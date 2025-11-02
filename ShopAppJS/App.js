@@ -15,6 +15,7 @@ import CheckoutScreen from './screens/CheckoutScreen.jsx';
 import OrderHistoryScreen from './screens/OrderHistoryScreen.jsx'; 
 import SearchScreen from './screens/SearchScreen.jsx';
 import AccountScreen from './screens/AccountScreen.jsx';
+import ThankYouScreen from './screens/ThankYouScreen.jsx';
 
 // 🚀 Màn hình Admin
 import AdminDashboard from './screens/AdminDashboard.jsx';
@@ -47,6 +48,7 @@ export default function App() {
         <Stack.Screen name="OrderHistory" component={OrderHistoryScreen} />
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="Account" component={AccountScreen} />
+        <Stack.Screen name="ThankYou" component={ThankYouScreen} />
         
         {/* Admin Stack */}
         <Stack.Screen name="AdminDashboard" component={AdminDashboard} />

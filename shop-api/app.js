@@ -1,4 +1,4 @@
-// app.js (Phiên bản HOÀN CHỈNH - Đã sửa lỗi)
+// app.js (Đã cập nhật thêm trường Ghi chú)
 
 const express = require("express");
 const cors = require("cors");
@@ -10,7 +10,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🚨 IP này là 127.0.0.1 (để server kết nối MongoDB trên CÙNG máy tính)
 const MONGO_URI = "mongodb://127.0.0.1:27017/shopdb"; 
 const JWT_SECRET = "MY_SUPER_SECRET_KEY_123456"; 
 
@@ -70,7 +69,7 @@ const orderItemSchema = new mongoose.Schema({
   quantity: Number,
 });
 
-// Order (Đã có notes)
+// 🚀 CẬP NHẬT: Thêm trường 'notes' vào Order
 const orderSchema = new mongoose.Schema({
   id: Number,
   order_code: String,
@@ -80,7 +79,7 @@ const orderSchema = new mongoose.Schema({
   shipping_address: String,
   phone_number: String,
   payment_method: String,
-  notes: { type: String, default: '' }, // Ghi chú
+  notes: { type: String, default: '' }, // 👈 THÊM TRƯỜNG GHI CHÚ
   total_amount: Number,
   items: [orderItemSchema],
   status: { type: String, enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"], default: "Pending" },
@@ -130,7 +129,7 @@ app.post("/auth/register", async (req, res) => {
       name,
       email,
       password,
-      role: 'customer' // Mặc định là customer
+      role: 'customer'
     });
     await newUser.save();
     res.status(201).json({ message: "Đăng ký thành công!", user: docToJson(newUser) });
@@ -161,6 +160,7 @@ app.post("/auth/login", async (req, res) => {
       user: docToJson(user) 
     });
   } catch (err) {
+    console.error("Lỗi đăng nhập:", err);
     res.status(500).json({ message: "Lỗi Server." });
   }
 });
@@ -206,10 +206,24 @@ app.get("/api/products/search", verifyToken, async (req, res) => {
   }
 });
 
+app.get("/api/orders/history/:userId", verifyToken, async (req, res) => { 
+  const userId = parseInt(req.params.userId); 
+  if (req.user.userId !== userId) {
+    return res.status(403).json({ message: "Không được phép xem lịch sử đơn hàng của người khác." });
+  }
+  try {
+    const orders = await Order.find({ user_id: userId }).sort({ created_at: -1 }); 
+    res.status(200).json(orders.map(docToJson));
+  } catch (err) {
+    res.status(500).json({ message: "Lỗi Server khi tải lịch sử đơn hàng." });
+  }
+});
+
+// 🚀 CẬP NHẬT: API Đặt hàng (Thêm 'notes')
 app.post("/api/orders", verifyToken, async (req, res) => { 
   const {
     userId, customerName, shippingAddress, phoneNumber, 
-    paymentMethod, totalAmount, items, notes 
+    paymentMethod, totalAmount, items, notes // 👈 Lấy 'notes' từ body
   } = req.body;
   
   if (req.user.userId !== userId) {
@@ -226,12 +240,12 @@ app.post("/api/orders", verifyToken, async (req, res) => {
       id: nextId,
       order_code: orderIdCode,
       user_id: userId,
-      customer_name: customerName, 
+      customer_name: customerName, // Dùng tên người nhận
       customer_email: req.user.email,
       shipping_address: shippingAddress,
       phone_number: phoneNumber,
       payment_method: paymentMethod || "COD", 
-      notes: notes || "", 
+      notes: notes || "", // 👈 Lưu ghi chú
       total_amount: totalAmount,
       items: items, 
       status: "Pending",
@@ -240,20 +254,8 @@ app.post("/api/orders", verifyToken, async (req, res) => {
     await newOrder.save();
     res.status(201).json({ message: "Đặt hàng thành công!", order: docToJson(newOrder) });
   } catch (err) {
+    console.error("Lỗi khi tạo đơn hàng:", err);
     res.status(500).json({ message: "Lỗi Server khi đặt hàng." });
-  }
-});
-
-app.get("/api/orders/history/:userId", verifyToken, async (req, res) => { 
-  const userId = parseInt(req.params.userId); 
-  if (req.user.userId !== userId) {
-    return res.status(403).json({ message: "Không được phép xem lịch sử đơn hàng của người khác." });
-  }
-  try {
-    const orders = await Order.find({ user_id: userId }).sort({ created_at: -1 }); 
-    res.status(200).json(orders.map(docToJson));
-  } catch (err) {
-    res.status(500).json({ message: "Lỗi Server khi tải lịch sử đơn hàng." });
   }
 });
 

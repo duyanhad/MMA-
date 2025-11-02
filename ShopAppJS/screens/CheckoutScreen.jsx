@@ -1,151 +1,144 @@
-// screens/CheckoutScreen.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity,
-  ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar,
+  ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar, Image, Modal,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import CustomInput from '../components/CustomInput'; 
+import QRCode from 'react-native-qrcode-svg';
+import CustomInput from '../components/CustomInput';
 import { CommonActions } from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
 
-const PRIMARY_COLOR = '#2C3E50'; 
-const SECONDARY_COLOR = '#34495E'; 
-const ACCENT_COLOR = '#3498DB'; 
-const ERROR_COLOR = '#E74C3C'; 
-const TEXT_COLOR = '#333333';
+const PRIMARY_COLOR = '#2C3E50';
+const SECONDARY_COLOR = '#34495E';
+const ACCENT_COLOR = '#3498DB';
 const LIGHT_TEXT_COLOR = '#FFFFFF';
-const BORDER_COLOR = '#BDC3C7';
 const BACKGROUND_COLOR = '#F5F5F5';
-const API_URL = 'http://192.168.1.102:3000'; 
+const API_URL = 'http://192.168.1.102:3000'; // ⚠️ đổi thành IP backend của bạn
 
-const formatPrice = (price) => {
-  return price.toLocaleString('vi-VN') + ' đ';
-};
-
-// 🚀 BẮT BUỘC: Hàm trợ giúp lấy Token
-const getToken = async (navigation) => {
-  const token = await AsyncStorage.getItem('userToken');
-  if (!token) {
-    Alert.alert('Phiên đăng nhập hết hạn', 'Vui lòng đăng nhập lại.');
-    navigation.dispatch(
-      CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] })
-    );
-    return null;
-  }
-  return token;
-};
+const formatPrice = (price) => price.toLocaleString('vi-VN') + ' đ';
 
 export default function CheckoutScreen({ route, navigation }) {
   const { cartItems, totalAmount } = route.params;
-  
   const [userInfo, setUserInfo] = useState(null);
-  
-  // 🚀 SỬA: Thêm state cho các trường mới
-  const [recipientName, setRecipientName] = useState(''); // Tên người nhận
+  const [recipientName, setRecipientName] = useState('');
   const [shippingAddress, setShippingAddress] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [notes, setNotes] = useState(''); // Ghi chú
-  
+  const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('COD');
   const [loading, setLoading] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [selectedBank, setSelectedBank] = useState('');
+  const [selectedWallet, setSelectedWallet] = useState('');
 
   useEffect(() => {
     const loadUserData = async () => {
-      try {
-        const userData = await AsyncStorage.getItem('userInfo');
-        if (userData) {
-          const parsedUser = JSON.parse(userData);
-          setUserInfo(parsedUser);
-          // 🚀 SỬA: Tự động điền tên người nhận bằng tên tài khoản
-          setRecipientName(parsedUser.name); 
-        }
-      } catch (error) {
-        console.error('Lỗi tải thông tin người dùng:', error);
+      const data = await AsyncStorage.getItem('userInfo');
+      if (data) {
+        const parsed = JSON.parse(data);
+        setUserInfo(parsed);
+        setRecipientName(parsed.name || '');
       }
     };
     loadUserData();
   }, []);
 
-  // 🚀 SỬA: Gửi Token và các trường mới
+  // 📞 Hàm kiểm tra số điện thoại Việt Nam
+  const isValidPhoneNumber = (number) => /^0\d{9}$/.test(number);
+
   const handleCheckout = async () => {
-    // 🚀 SỬA: Kiểm tra Tên người nhận
-    if (!shippingAddress || !phoneNumber || !recipientName) {
-      Alert.alert('Lỗi', 'Vui lòng nhập đầy đủ Tên, Địa chỉ và Số điện thoại');
+    if (!recipientName || !shippingAddress || !phoneNumber) {
+      Alert.alert('Thiếu thông tin', 'Vui lòng nhập đầy đủ Tên, Địa chỉ và Số điện thoại');
       return;
     }
+
+    if (!isValidPhoneNumber(phoneNumber)) {
+      Alert.alert('Số điện thoại không hợp lệ', 'Vui lòng nhập đúng định dạng 10 chữ số, bắt đầu bằng 0');
+      return;
+    }
+
     if (!userInfo) {
-      Alert.alert('Lỗi', 'Không tìm thấy thông tin người dùng, vui lòng đăng nhập lại.');
+      Alert.alert('Lỗi', 'Không tìm thấy thông tin người dùng.');
       return;
     }
 
     setLoading(true);
-    
-    const token = await getToken(navigation);
+    const token = await AsyncStorage.getItem('userToken');
     if (!token) {
       setLoading(false);
+      Alert.alert('Phiên đăng nhập hết hạn');
+      navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] }));
       return;
     }
 
+    const paymentDetail =
+      paymentMethod === 'BANK' ? selectedBank :
+      paymentMethod === 'WALLET' ? selectedWallet : 'COD';
+
     const orderData = {
       userId: userInfo.id,
-      customerName: recipientName, // 👈 Dùng Tên người nhận
+      customerName: recipientName,
       customerEmail: userInfo.email,
-      shippingAddress: shippingAddress,
-      phoneNumber: phoneNumber,
-      paymentMethod: paymentMethod,
-      notes: notes, // 👈 Thêm Ghi chú
-      totalAmount: totalAmount,
+      shippingAddress,
+      phoneNumber,
+      paymentMethod,
+      paymentDetail,
+      notes,
+      totalAmount,
       items: cartItems.map(item => ({
-        product_id: item.product.id,
-        name: item.product.name,
+        product_id: item.id,
+        name: item.name,
         size: item.selectedSize,
-        price: item.product.price * (1 - item.product.discount / 100),
+        price: item.final_price,
         quantity: item.quantity,
+        image_url: item.image_url,
       })),
     };
 
     try {
       const res = await fetch(`${API_URL}/api/orders`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(orderData),
       });
-
       const data = await res.json();
-      
       if (res.ok) {
-        await AsyncStorage.removeItem('cart'); 
-        Alert.alert(
-          'Thành công!',
-          'Bạn đã đặt hàng thành công.',
-          [
-            { text: 'OK', onPress: () => navigation.dispatch(
-                CommonActions.reset({ index: 0, routes: [{ name: 'Home' }] })
-              ) 
-            }
-          ]
+        await AsyncStorage.removeItem('cart');
+        navigation.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [{ name: 'ThankYou', params: { cartItems, totalAmount } }],
+          })
         );
-      } else {
-        throw new Error(data.message || 'Đặt hàng thất bại');
-      }
-    } catch (error) {
-      Alert.alert('Lỗi', error.message);
+      } else throw new Error(data.message);
+    } catch (e) {
+      Alert.alert('Lỗi', e.message);
     } finally {
       setLoading(false);
     }
   };
 
+  const openPaymentModal = (method) => {
+    setPaymentMethod(method);
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setSelectedBank('');
+    setSelectedWallet('');
+  };
+
+  const copyToClipboard = async (text) => {
+    await Clipboard.setStringAsync(text);
+    Alert.alert('Đã sao chép', text);
+  };
+
   return (
     <LinearGradient colors={[PRIMARY_COLOR, SECONDARY_COLOR]} style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <StatusBar barStyle="light-content" backgroundColor={PRIMARY_COLOR} />
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -153,96 +146,193 @@ export default function CheckoutScreen({ route, navigation }) {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Thanh toán</Text>
         </View>
-        
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
-          
-          {/* Thông tin khách hàng (Hiển thị Email) */}
-          <Text style={styles.sectionTitle}>Thông tin khách hàng</Text>
-          <View style={styles.userInfoContainer}>
-            <View style={styles.infoRow}>
-              <Ionicons name="mail-outline" size={20} color={LIGHT_TEXT_COLOR} />
-              <Text style={styles.infoText}>{userInfo ? userInfo.email : 'Đang tải...'}</Text>
-            </View>
+
+        <ScrollView contentContainerStyle={{ padding: 20 }}>
+          <Text style={styles.sectionTitle}>Thông tin người nhận hàng</Text>
+
+          <CustomInput
+            placeholder="Tên người nhận (*)"
+            value={recipientName}
+            onChangeText={setRecipientName}
+            iconName="person-outline"
+          />
+
+          {/* Email không thể sửa */}
+          <View style={styles.disabledField}>
+            <Ionicons name="mail-outline" size={22} color="#888" style={{ marginRight: 8 }} />
+            <Text style={styles.disabledText}>{userInfo?.email || 'Chưa có email'}</Text>
           </View>
-          
-          {/* 🚀 SỬA: Form giao hàng */}
-          <Text style={styles.sectionTitle}>Thông tin giao hàng</Text>
-          <View style={styles.form}>
-            <CustomInput 
-              placeholder="Tên người nhận (*)"
-              value={recipientName}
-              onChangeText={setRecipientName}
-              iconName="person-outline"
-            />
-            <CustomInput 
-              placeholder="Địa chỉ giao hàng (*)"
-              value={shippingAddress}
-              onChangeText={setShippingAddress}
-              iconName="location-outline"
-            />
-            <CustomInput 
-              placeholder="Số điện thoại (*)"
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
-              iconName="call-outline"
-              keyboardType="phone-pad"
-            />
-            <CustomInput 
-              placeholder="Ghi chú (tùy chọn)"
-              value={notes}
-              onChangeText={setNotes}
-              iconName="document-text-outline"
-            />
+
+          <CustomInput
+            placeholder="Địa chỉ giao hàng (*)"
+            value={shippingAddress}
+            onChangeText={setShippingAddress}
+            iconName="location-outline"
+          />
+
+          <CustomInput
+            placeholder="Số điện thoại (*)"
+            value={phoneNumber}
+            onChangeText={setPhoneNumber}
+            iconName="call-outline"
+            keyboardType="phone-pad"
+          />
+
+          <CustomInput
+            placeholder="Ghi chú (tùy chọn)"
+            value={notes}
+            onChangeText={setNotes}
+            iconName="document-text-outline"
+          />
+
+          {/* 🛍️ Sản phẩm */}
+          <View style={styles.productList}>
+            <Text style={styles.sectionTitleBlack}>Sản phẩm trong đơn hàng</Text>
+            <ScrollView style={styles.productScroll}>
+              {cartItems.map((item, i) => (
+                <View key={i} style={styles.productItem}>
+                  <Image source={{ uri: item.image_url }} style={styles.productImage} />
+                  <View style={styles.productInfo}>
+                    <Text style={styles.productName}>{item.name}</Text>
+                    <Text style={styles.productDetail}>Size: {item.selectedSize}</Text>
+                    <Text style={styles.productDetail}>SL: {item.quantity} × {formatPrice(item.final_price)}</Text>
+                    <Text style={styles.productSubtotal}>Thành tiền: {formatPrice(item.final_price * item.quantity)}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
           </View>
-          
-          <Text style={styles.sectionTitle}>Phương thức thanh toán</Text>
-          <View style={styles.paymentMethods}>
-            <TouchableOpacity style={styles.radio} onPress={() => setPaymentMethod('COD')}>
-              <Ionicons 
-                name={paymentMethod === 'COD' ? 'radio-button-on' : 'radio-button-off'} 
-                size={24} 
-                color={LIGHT_TEXT_COLOR} 
-              />
-              <Text style={styles.radioText}>Thanh toán khi nhận hàng (COD)</Text>
-            </TouchableOpacity>
+
+          {/* 💳 Thanh toán */}
+          <View style={styles.paymentSection}>
+            <Text style={styles.sectionTitleBlack}>Phương thức thanh toán</Text>
+            {[
+              { key: 'COD', label: 'Thanh toán khi nhận hàng (COD)', icon: 'cash-outline' },
+              { key: 'BANK', label: 'Chuyển khoản ngân hàng', icon: 'card-outline' },
+              { key: 'WALLET', label: 'Ví điện tử (Momo / ZaloPay)', icon: 'phone-portrait-outline' },
+            ].map((method) => (
+              <TouchableOpacity
+                key={method.key}
+                style={[styles.paymentOption, paymentMethod === method.key && styles.paymentOptionSelected]}
+                onPress={() => openPaymentModal(method.key)}
+              >
+                <Ionicons
+                  name={method.icon}
+                  size={22}
+                  color={paymentMethod === method.key ? LIGHT_TEXT_COLOR : '#555'}
+                  style={{ marginRight: 10 }}
+                />
+                <Text style={[styles.paymentText, paymentMethod === method.key && styles.paymentTextSelected]}>
+                  {method.label}
+                </Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={paymentMethod === method.key ? LIGHT_TEXT_COLOR : '#555'}
+                />
+              </TouchableOpacity>
+            ))}
           </View>
-          
+
           <View style={styles.summary}>
-            <Text style={styles.summaryTitle}>Tóm tắt đơn hàng</Text>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Tạm tính ({cartItems.length} sản phẩm)</Text>
-              <Text style={styles.summaryValue}>{formatPrice(totalAmount)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Phí vận chuyển</Text>
-              <Text style={styles.summaryValue}>{formatPrice(0)}</Text>
-            </View>
-            <View style={styles.totalRow}>
-              <Text style={styles.totalText}>Tổng cộng</Text>
-              <Text style={styles.totalPrice}>{formatPrice(totalAmount)}</Text>
-            </View>
+            <Text style={styles.summaryTitle}>Tổng thanh toán</Text>
+            <Text style={styles.totalPrice}>{formatPrice(totalAmount)}</Text>
           </View>
         </ScrollView>
-        
+
         <View style={styles.checkoutButtonContainer}>
-          <TouchableOpacity 
-            style={styles.checkoutButton} 
+          <TouchableOpacity
+            style={[styles.checkoutButton, (!recipientName || !shippingAddress || !phoneNumber) && { opacity: 0.5 }]}
             onPress={handleCheckout}
-            disabled={loading}
+            disabled={!recipientName || !shippingAddress || !phoneNumber || loading}
           >
-            <LinearGradient
-              colors={[ACCENT_COLOR, '#2980B9']}
-              style={styles.buttonGradient}
-            >
-              {loading ? (
-                <ActivityIndicator color={LIGHT_TEXT_COLOR} />
-              ) : (
-                <Text style={styles.checkoutText}>ĐẶT HÀNG</Text>
-              )}
+            <LinearGradient colors={[ACCENT_COLOR, '#2980B9']} style={styles.buttonGradient}>
+              {loading ? <ActivityIndicator color={LIGHT_TEXT_COLOR} /> : <Text style={styles.checkoutText}>ĐẶT HÀNG</Text>}
             </LinearGradient>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* ⚡ Modal Popup */}
+      <Modal visible={showModal} transparent animationType="fade" onRequestClose={closeModal}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalInner}>
+            <Text style={styles.modalTitle}>
+              {paymentMethod === 'BANK' ? 'Chuyển khoản ngân hàng' : 'Thanh toán qua ví điện tử'}
+            </Text>
+            {/* BANK */}
+            {paymentMethod === 'BANK' && (
+              <View>
+                {[
+                  { name: 'Vietcombank', logo: require('../assets/banks/vietcombank.jpg'), stk: '0123456789', owner: 'NGUYEN DUY ANH' },
+                  { name: 'Techcombank', logo: require('../assets/banks/techcombank.jpg'), stk: '19012345678910', owner: 'NGUYEN DUY ANH' },
+                  { name: 'BIDV', logo: require('../assets/banks/bidv.jpg'), stk: '6123456789', owner: 'NGUYEN DUY ANH' },
+                  { name: 'MB Bank', logo: require('../assets/banks/mbbank.jpg'), stk: '9704123456789123', owner: 'NGUYEN DUY ANH' },
+                ].map((bank) => (
+                  <TouchableOpacity
+                    key={bank.name}
+                    style={[styles.bankOption, selectedBank === bank.name && styles.bankOptionSelected]}
+                    onPress={() => setSelectedBank(bank.name)}
+                  >
+                    <View style={styles.bankInfo}>
+                      <Image source={bank.logo} style={styles.bankLogo} />
+                      <View>
+                        <Text style={styles.bankText}>{bank.name}</Text>
+                        <Text style={styles.bankSub}>STK: {bank.stk}</Text>
+                        <Text style={styles.bankSub}>Chủ TK: {bank.owner}</Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity onPress={() => copyToClipboard(bank.stk)}>
+                      <Ionicons name="copy-outline" size={20} color={ACCENT_COLOR} />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* WALLET */}
+            {paymentMethod === 'WALLET' && (
+              <View style={{ alignItems: 'center' }}>
+                {[
+                  { name: 'Momo', logo: require('../assets/wallets/momo.png') },
+                  { name: 'ZaloPay', logo: require('../assets/wallets/zalopay.jpg') },
+                  { name: 'VNPay', logo: require('../assets/wallets/vnpay.jpg') },
+                ].map((wallet) => (
+                  <TouchableOpacity
+                    key={wallet.name}
+                    style={[styles.walletOption, selectedWallet === wallet.name && styles.walletOptionSelected]}
+                    onPress={() => setSelectedWallet(wallet.name)}
+                  >
+                    <View style={styles.bankInfo}>
+                      <Image source={wallet.logo} style={styles.walletLogo} />
+                      <Text style={styles.bankText}>{wallet.name}</Text>
+                    </View>
+                    {selectedWallet === wallet.name && (
+                      <Ionicons name="checkmark-circle" size={22} color={ACCENT_COLOR} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+                {selectedWallet ? (
+                  <View style={styles.qrContainer}>
+                    <Text style={styles.qrTitle}>Quét mã QR để thanh toán</Text>
+                    <QRCode
+                      value={`Thanh toán ${selectedWallet}: ${formatPrice(totalAmount)}`}
+                      size={180}
+                      backgroundColor="white"
+                      color="#000"
+                    />
+                    <Text style={styles.qrSubtitle}>{selectedWallet}</Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.modalCloseButton} onPress={closeModal}>
+              <Text style={styles.modalCloseText}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
@@ -257,27 +347,73 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: PRIMARY_COLOR,
   },
-  backButton: { marginRight: 15, padding: 5 },
+  backButton: { marginRight: 15 },
   headerTitle: { fontSize: 22, fontWeight: 'bold', color: LIGHT_TEXT_COLOR },
-  scrollContainer: { padding: 20 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: LIGHT_TEXT_COLOR, marginBottom: 15 },
-  userInfoContainer: { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: 15, marginBottom: 20 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
-  infoText: { color: LIGHT_TEXT_COLOR, fontSize: 16, marginLeft: 10 },
-  form: { marginBottom: 10 },
-  checkoutButtonContainer: { padding: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: LIGHT_TEXT_COLOR, marginVertical: 10 },
+  sectionTitleBlack: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 10 },
+
+  // 🧍‍♂️ Email không sửa
+  disabledField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+  },
+  disabledText: {
+    color: '#ccc',
+    fontSize: 15,
+  },
+
+  productList: { backgroundColor: 'rgba(255, 255, 255, 1)', padding: 15, borderRadius: 12, marginTop: 10 },
+  productScroll: { maxHeight: 200 },
+  productItem: {
+    flexDirection: 'row',
+    marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.2)',
+    paddingBottom: 10,
+  },
+  productImage: { width: 70, height: 70, borderRadius: 10, marginRight: 10, backgroundColor: 'rgba(255, 252, 252, 1)', resizeMode: 'contain' },
+  productInfo: { flex: 1, justifyContent: 'center' },
+  productName: { fontWeight: 'bold', fontSize: 15, color: '#000000ff' },
+  productDetail: { fontSize: 14, color: '#000000ff' },
+  productSubtotal: { fontSize: 14, fontWeight: '600', color: '#00bfff', marginTop: 5 },
+
+  paymentSection: { backgroundColor: 'rgba(255, 248, 248, 1)', padding: 15, borderRadius: 12, marginTop: 15 },
+  paymentOption: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(14, 2, 2, 0.08)', padding: 10,
+    borderRadius: 12, marginBottom: 10,
+  },
+  paymentOptionSelected: { backgroundColor: 'rgba(52,152,219,0.5)' },
+  paymentText: { flex: 1, fontSize: 15, color: '#000000ff' },
+  paymentTextSelected: { color: '#000000ff', fontWeight: 'bold' },
+
+  summary: { backgroundColor: 'rgba(255,255,255,0.15)', padding: 15, borderRadius: 12, marginTop: 15, alignItems: 'center' },
+  summaryTitle: { fontSize: 16, fontWeight: '600', color: '#fff', marginBottom: 5 },
+  totalPrice: { fontSize: 18, color: '#00bfff', fontWeight: 'bold' },
+
+  checkoutButtonContainer: { padding: 20 },
   checkoutButton: { borderRadius: 30, overflow: 'hidden' },
-  buttonGradient: { padding: 15, alignItems: 'center', justifyContent: 'center' },
+  buttonGradient: { padding: 15, alignItems: 'center' },
   checkoutText: { color: LIGHT_TEXT_COLOR, fontSize: 18, fontWeight: 'bold' },
-  paymentMethods: { paddingLeft: 10, marginBottom: 20 },
-  radio: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  radioText: { color: LIGHT_TEXT_COLOR, marginLeft: 10, fontSize: 16 },
-  summary: { backgroundColor: LIGHT_TEXT_COLOR, borderRadius: 15, padding: 20, marginBottom: 20 },
-  summaryTitle: { fontSize: 18, fontWeight: 'bold', color: TEXT_COLOR, marginBottom: 10 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  summaryLabel: { fontSize: 16, color: '#555' },
-  summaryValue: { fontSize: 16, fontWeight: '500', color: TEXT_COLOR },
-  totalRow: { borderTopWidth: 1, borderTopColor: BORDER_COLOR, paddingTop: 10, marginTop: 5, flexDirection: 'row', justifyContent: 'space-between' },
-  totalText: { fontSize: 18, fontWeight: 'bold', color: TEXT_COLOR },
-  totalPrice: { fontSize: 20, fontWeight: 'bold', color: ACCENT_COLOR },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalInner: { width: '88%', backgroundColor: '#fff', borderRadius: 20, padding: 20, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 10, elevation: 10 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 15, color: PRIMARY_COLOR },
+  bankOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8f9fb', borderRadius: 14, padding: 10, marginBottom: 10 },
+  bankOptionSelected: { backgroundColor: '#eaf4ff', shadowColor: '#3498DB', shadowOpacity: 0.2, shadowRadius: 6 },
+  bankInfo: { flexDirection: 'row', alignItems: 'center' },
+  bankLogo: { width: 40, height: 40, resizeMode: 'contain', marginRight: 10 },
+  bankText: { fontSize: 16, color: '#333' },
+  bankSub: { fontSize: 13, color: '#555', marginTop: 2 },
+  walletOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8f9fb', borderRadius: 14, padding: 10, marginBottom: 10 },
+  walletOptionSelected: { backgroundColor: '#eaf4ff', shadowColor: '#3498DB', shadowOpacity: 0.25, shadowRadius: 6 },
+  walletLogo: { width: 40, height: 40, resizeMode: 'contain', marginRight: 10 },
+  qrContainer: { marginTop: 15, alignItems: 'center', borderRadius: 14, backgroundColor: '#f9f9f9', padding: 15 },
+  qrTitle: { fontWeight: 'bold', fontSize: 15, marginBottom: 10, color: '#333' },
+  qrSubtitle: { marginTop: 8, fontSize: 14, color: ACCENT_COLOR, fontWeight: '600' },
+  modalCloseButton: { marginTop: 20, backgroundColor: ACCENT_COLOR, paddingVertical: 10, borderRadius: 12 },
+  modalCloseText: { color: LIGHT_TEXT_COLOR, fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
 });
