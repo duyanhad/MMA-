@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 
+
 // 🚀 Màn hình Auth
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
@@ -24,6 +25,8 @@ import AdminDashboard from './screens/AdminDashboard.jsx';
 import AdminProductList from './screens/AdminProductList.jsx';
 import AdminProductEdit from './screens/AdminProductEdit.jsx';
 import AdminUserList from './screens/AdminUserList.jsx';
+import OrderManagerScreen from './screens/OrderManagerScreen.jsx';
+import AdminInventoryScreen from './screens/AdminInventoryScreen';
 // (AdminUserEdit đã bị xóa theo yêu cầu)
 
 const Stack = createNativeStackNavigator();
@@ -58,6 +61,13 @@ export default function App() {
         <Stack.Screen name="AdminProductList" component={AdminProductList} />
         <Stack.Screen name="AdminProductEdit" component={AdminProductEdit} />
         <Stack.Screen name="AdminUserList" component={AdminUserList} />
+        <Stack.Screen name="OrderManager" component={OrderManagerScreen} />
+        <Stack.Screen 
+  name="AdminInventoryScreen" 
+  component={AdminInventoryScreen} 
+  options={{ title: "Quản lý kho" }}
+/>
+
         
       </Stack.Navigator>
     </NavigationContainer>
