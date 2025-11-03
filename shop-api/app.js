@@ -377,6 +377,74 @@ app.put("/api/admin/users/:userId/toggle-block", verifyToken, isAdmin, async (re
   }
 });
 
+app.post("/api/orders", verifyToken, async (req, res) => {
+  const {
+    userId,
+    customerName,
+    shippingAddress,
+    phoneNumber,
+    paymentMethod,
+    totalAmount,
+    items,
+    notes
+  } = req.body;
+
+  // Kiểm tra token hợp lệ
+  if (req.user.userId !== userId) {
+    return res.status(403).json({ message: "Token không khớp với ID người dùng." });
+  }
+
+  // Kiểm tra đầu vào
+  if (!userId || !customerName || !shippingAddress || !totalAmount || !items || items.length === 0) {
+    return res.status(400).json({ message: "Thiếu thông tin bắt buộc khi đặt hàng." });
+  }
+
+  try {
+    // ✅ Lấy ID đơn hàng mới
+    const last = await Order.findOne().sort({ id: -1 });
+    const nextId = last ? last.id + 1 : 1;
+    const orderIdCode = `#S${moment().format('YYYY')}${(nextId % 10000).toString().padStart(4, '0')}`;
+
+    // ✅ Gắn đầy đủ thông tin sản phẩm (bao gồm hình ảnh)
+    const orderItems = items.map(i => ({
+      product_id: i.product_id,
+      name: i.name,
+      size: i.size || '',
+      price: i.price,
+      quantity: i.quantity,
+      image_url: i.image_url || i.product_image || '', // 👈 lấy ảnh từ client, fallback nếu chưa có
+    }));
+
+    // ✅ Tạo đơn hàng mới
+    const newOrder = new Order({
+      id: nextId,
+      order_code: orderIdCode,
+      user_id: userId,
+      customer_name: customerName,
+      customer_email: req.user.email,
+      shipping_address: shippingAddress,
+      phone_number: phoneNumber,
+      payment_method: paymentMethod || "COD",
+      notes: notes || "",
+      total_amount: totalAmount,
+      items: orderItems, // ✅ sản phẩm đã có ảnh
+      status: "Pending",
+      created_at: moment().toISOString(),
+    });
+
+    await newOrder.save();
+
+    res.status(201).json({
+      message: "Đặt hàng thành công!",
+      order: docToJson(newOrder),
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi khi tạo đơn hàng:", err);
+    res.status(500).json({ message: "Lỗi Server khi đặt hàng." });
+  }
+});  
+
 // ----------------- LISTEN -----------------
 const PORT = 3000;
 app.listen(PORT, '0.0.0.0', () => { 

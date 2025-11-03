@@ -3,6 +3,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+
 // 🚀 Màn hình Auth
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
@@ -16,6 +17,7 @@ import OrderHistoryScreen from './screens/OrderHistoryScreen.jsx';
 import SearchScreen from './screens/SearchScreen.jsx';
 import AccountScreen from './screens/AccountScreen.jsx';
 import ThankYouScreen from './screens/ThankYouScreen.jsx';
+import OrderDetailScreen from './screens/OrderDetailScreen.jsx';
 
 // 🚀 Màn hình Admin
 import AdminDashboard from './screens/AdminDashboard.jsx';
@@ -49,6 +51,7 @@ export default function App() {
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="Account" component={AccountScreen} />
         <Stack.Screen name="ThankYou" component={ThankYouScreen} />
+        <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
         
         {/* Admin Stack */}
         <Stack.Screen name="AdminDashboard" component={AdminDashboard} />
