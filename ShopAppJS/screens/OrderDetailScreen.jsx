@@ -81,23 +81,34 @@ const OrderItemCard = ({ item, index, imageUrl, onImagePress }) => {
       />
       <View style={styles.itemInfo}>
         <Text style={styles.itemName} numberOfLines={2}>
-          {item.name}
+          {item?.name || 'Sản phẩm'}
         </Text>
-        {item.size ? <Text style={styles.itemSize}>Size: {item.size}</Text> : null}
-        <Text style={styles.itemQuantity}>Số lượng: {item.quantity}</Text>
-        <Text style={styles.itemPrice}>{item.price.toLocaleString('vi-VN')} đ</Text>
+        {item?.size ? <Text style={styles.itemSize}>Size: {item.size}</Text> : null}
+        <Text style={styles.itemQuantity}>Số lượng: {item?.quantity || 0}</Text>
+        <Text style={styles.itemPrice}>{((item?.price || 0)).toLocaleString('vi-VN')} đ</Text>
       </View>
     </Pressable>
   );
 };
 
 export default function OrderDetailScreen({ route, navigation }) {
-  const { order } = route.params;
+  // nhận order an toàn
+  const incomingOrder = route?.params?.order || null;
+  const [order] = useState(incomingOrder);
+
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState('');
   const scrollY = useRef(new Animated.Value(0)).current;
+
+  // nếu không có order → quay lại
+  useEffect(() => {
+    if (!order) {
+      Alert.alert('Không có dữ liệu đơn hàng', 'Vui lòng thử lại.');
+      navigation.goBack();
+    }
+  }, [order, navigation]);
 
   const getToken = useCallback(async () => {
     const token = await AsyncStorage.getItem('userToken');
@@ -118,7 +129,7 @@ export default function OrderDetailScreen({ route, navigation }) {
       });
       if (!res.ok) throw new Error('Không thể tải danh sách sản phẩm');
       const data = await res.json();
-      setProducts(data);
+      setProducts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Lỗi khi tải sản phẩm:', err);
     } finally {
@@ -143,7 +154,7 @@ export default function OrderDetailScreen({ route, navigation }) {
     }
   };
 
-  const statusInfo = getStatusInfo(order.status);
+  const statusInfo = getStatusInfo(order?.status || 'Pending');
 
   const headerHeight = scrollY.interpolate({
     inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
@@ -202,15 +213,15 @@ export default function OrderDetailScreen({ route, navigation }) {
               <Text style={styles.infoTitle}>Thông tin đơn hàng</Text>
             </View>
             <Text style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Mã đơn: </Text>#{order.order_code}
+              <Text style={styles.infoLabel}>Mã đơn: </Text>#{order?.order_code || '—'}
             </Text>
             <Text style={styles.infoRow}>
               <Text style={styles.infoLabel}>Ngày đặt: </Text>
-              {moment(order.created_at).format('HH:mm - DD/MM/YYYY')}
+              {order?.created_at ? moment(order.created_at).format('HH:mm - DD/MM/YYYY') : '—'}
             </Text>
             <Text style={styles.infoRow}>
               <Text style={styles.infoLabel}>Thanh toán: </Text>
-              {order.payment_method || 'COD'}
+              {order?.payment_method || 'COD'}
             </Text>
           </MotiView>
 
@@ -227,22 +238,22 @@ export default function OrderDetailScreen({ route, navigation }) {
             </View>
             <Text style={styles.infoRow}>
               <Text style={styles.infoLabel}>Người nhận: </Text>
-              {order.customer_name}
+              {order?.customer_name || '—'}
             </Text>
             <Text style={styles.infoRow}>
               <Text style={styles.infoLabel}>SĐT: </Text>
-              {order.phone_number || 'Không có'}
+              {order?.phone_number || '—'}
             </Text>
             <Text style={styles.infoRow}>
               <Text style={styles.infoLabel}>Địa chỉ: </Text>
-              {order.shipping_address}
+              {order?.shipping_address || '—'}
             </Text>
           </MotiView>
 
           {/* Sản phẩm */}
           <Text style={styles.sectionTitle}>Sản phẩm đã mua</Text>
           <ScrollView style={{ maxHeight: 350 }} nestedScrollEnabled>
-            {order.items.map((item, index) => {
+            {(Array.isArray(order?.items) ? order.items : []).map((item, index) => {
               const matched = products.find((p) => p.id === item.product_id);
               const imageUrl = matched?.image_url || '';
               return (
@@ -275,7 +286,7 @@ export default function OrderDetailScreen({ route, navigation }) {
             >
               <Text style={styles.totalLabel}>Tổng cộng:</Text>
               <Text style={styles.totalPrice}>
-                {order.total_amount.toLocaleString('vi-VN')} đ
+                {((order?.total_amount || 0)).toLocaleString('vi-VN')} đ
               </Text>
             </LinearGradient>
           </MotiView>

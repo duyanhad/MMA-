@@ -1,224 +1,201 @@
 // screens/AdminProductList.jsx
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, Alert, Image } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect, CommonActions } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useState, useCallback, useEffect } from "react";
+import {
+  View, Text, StyleSheet, FlatList, ActivityIndicator,
+  TouchableOpacity, Alert, Image, TextInput, StatusBar, Platform
+} from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
 
-// Định nghĩa màu
-const PRIMARY_COLOR = '#2C3E50';
-const SECONDARY_COLOR = '#34495E';
-const ACCENT_COLOR = '#3498DB';
-const ERROR_COLOR = '#E74C3C';
-const LIGHT_TEXT_COLOR = '#FFFFFF';
-const TEXT_COLOR = '#333333';
-const BACKGROUND_COLOR = '#F5F5F5';
-const BORDER_COLOR = '#BDC3C7';
+import { subscribeSettings } from "../utils/settingsBus";
+import { resolveThemeMode, getGradientColors, getScreenBackground } from "../utils/theme";
 
-// 🚨 Đảm bảo IP chính xác (của bạn là .102)
-const API_URL = 'http://192.168.1.102:3000';
-
-const formatPrice = (price) => {
-  return price ? price.toLocaleString('vi-VN') + ' đ' : '0 đ';
-};
+const API_URL = "http://192.168.1.102:3000";
+const SETTINGS_KEY = "admin_settings_v1";
 
 export default function AdminProductList({ navigation }) {
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState({ theme: "system" });
+  const themeMode = resolveThemeMode(settings.theme);
+  const gradientColors = getGradientColors(themeMode);
+  const screenBg = getScreenBackground(themeMode);
 
-  // Lấy Token
+  const [loading, setLoading] = useState(true);
+  const [products, setProducts] = useState([]);
+  const [search, setSearch] = useState("");
+
   const getToken = useCallback(async () => {
-    const token = await AsyncStorage.getItem('userToken');
+    const token = await AsyncStorage.getItem("userToken");
     if (!token) {
-      navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] }));
+      Alert.alert("Phiên đăng nhập hết hạn", "Vui lòng đăng nhập lại.");
       return null;
     }
     return token;
-  }, [navigation]);
+  }, []);
 
-  // Lấy tất cả sản phẩm
   const loadProducts = useCallback(async () => {
     setLoading(true);
     try {
       const token = await getToken();
       if (!token) return;
-
-      const res = await fetch(`${API_URL}/api/products`, { // Dùng API public (đã có verifyToken)
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await fetch(`${API_URL}/api/admin/inventory`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (res.ok) {
-        setProducts(data);
-      } else {
-        throw new Error(data.message);
-      }
-    } catch (error) {
-      Alert.alert('Lỗi', error.message || 'Không thể tải sản phẩm');
+      setProducts(Array.isArray(data) ? data : []);
+    } catch (e) {
+      Alert.alert("Lỗi", "Không thể tải danh sách sản phẩm.");
     } finally {
       setLoading(false);
     }
   }, [getToken]);
 
-  // 🚀 FIX: Sửa lại cấu trúc useFocusEffect
-  useFocusEffect(
-    useCallback(() => {
-      loadProducts();
-      
-      return () => {
-        // Hàm cleanup (nếu cần)
-      };
-    }, [loadProducts])
-  );
+  // theme live
+  useEffect(() => {
+    (async () => {
+      try {
+        const json = await AsyncStorage.getItem(SETTINGS_KEY);
+        if (json) setSettings((p) => ({ ...p, ...JSON.parse(json) }));
+      } catch {}
+    })();
+  }, []);
+  useEffect(() => subscribeSettings((next) => setSettings((p) => ({ ...p, ...next }))), []);
 
-  // Xử lý Xóa
-  const handleDelete = (productId) => {
-    Alert.alert(
-      "Xác nhận Xóa",
-      "Bạn có chắc chắn muốn xóa sản phẩm này? (Không thể hoàn tác)",
-      [
-        { text: "Hủy", style: "cancel" },
-        {
-          text: "Xóa",
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const token = await getToken();
-              if (!token) return;
+  useFocusEffect(useCallback(() => { loadProducts(); }, [loadProducts]));
 
-              const res = await fetch(`${API_URL}/api/admin/products/${productId}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-              });
-              
-              const data = await res.json();
-              if (res.ok) {
-                Alert.alert('Thành công', 'Đã xóa sản phẩm.');
-                loadProducts(); // Tải lại danh sách
-              } else {
-                throw new Error(data.message);
-              }
-            } catch (error) {
-              Alert.alert('Lỗi', error.message || 'Không thể xóa sản phẩm.');
-            }
+  const filtered = (Array.isArray(products) ? products : []).filter((p) => {
+    const q = search.toLowerCase().trim();
+    return !q
+      ? true
+      : (p?.name || "").toLowerCase().includes(q) ||
+        (p?.brand || "").toLowerCase().includes(q);
+  });
+
+  const removeProduct = (productId) => {
+    Alert.alert("Xoá sản phẩm", "Bạn chắc chắn muốn xoá sản phẩm này?", [
+      { text: "Huỷ", style: "cancel" },
+      {
+        text: "Xoá",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const token = await getToken();
+            if (!token) return;
+            const res = await fetch(`${API_URL}/api/admin/inventory/${productId}`, {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data?.message || "Xoá thất bại");
+            Alert.alert("Thành công", "Đã xoá sản phẩm.");
+            loadProducts();
+          } catch (e) {
+            Alert.alert("Lỗi", e.message || "Không thể xoá sản phẩm.");
           }
-        }
-      ]
-    );
+        },
+      },
+    ]);
   };
 
-  // Render
-  const renderProductItem = ({ item }) => (
-    <View style={styles.productCard}>
-      <Image source={{ uri: item.image_url }} style={styles.productImage} />
-      <View style={styles.productInfo}>
-        <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
-        <Text style={styles.productBrand}>{item.brand}</Text>
-        <Text style={styles.productPrice}>{formatPrice(item.price)}</Text>
+  const renderItem = ({ item }) => (
+    <View style={styles.card}>
+      <Image
+        source={{ uri: item.image_url || "https://via.placeholder.com/90x90?text=No+Image" }}
+        style={styles.thumbnail}
+      />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.brand}>{item.brand || "—"}</Text>
+        <Text style={styles.price}>{(item.price || 0).toLocaleString("vi-VN")} đ</Text>
+        <Text style={styles.stock}>Tồn kho: {item.stock ?? 0}</Text>
       </View>
-      <View style={styles.productActions}>
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('AdminProductEdit', { product: item })} // Chuyển sang trang Sửa
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={() => navigation.navigate("AdminProductEdit", { product: item })}
         >
-          <Ionicons name="create-outline" size={24} color={ACCENT_COLOR} />
+          <Ionicons name="create-outline" size={20} color="#3498DB" />
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => handleDelete(item.id)}
-        >
-          <Ionicons name="trash-outline" size={24} color={ERROR_COLOR} />
+        <TouchableOpacity style={styles.iconBtn} onPress={() => removeProduct(item.id)}>
+          <Ionicons name="trash-outline" size={20} color="#E74C3C" />
         </TouchableOpacity>
       </View>
     </View>
   );
 
   return (
-    <LinearGradient colors={[PRIMARY_COLOR, SECONDARY_COLOR]} style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={28} color={LIGHT_TEXT_COLOR} />
+    <View style={{ flex: 1, backgroundColor: screenBg }}>
+      <LinearGradient colors={gradientColors} style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Quản lý Sản phẩm</Text>
-        {/* Nút Thêm Mới */}
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('AdminProductEdit', { product: null })} // Chuyển sang trang Tạo
-          style={styles.addButton}
-        >
-          <Ionicons name="add" size={32} color={LIGHT_TEXT_COLOR} />
+        <Text style={styles.headerTitle}>Danh sách sản phẩm</Text>
+        <TouchableOpacity onPress={() => navigation.navigate("AdminProductEdit", { product: null })}>
+          <Ionicons name="add-circle-outline" size={26} color="#fff" />
         </TouchableOpacity>
+      </LinearGradient>
+
+      {/* Search box */}
+      <View style={styles.searchBox}>
+        <Ionicons name="search-outline" size={20} color="#666" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Tìm theo tên / brand..."
+          placeholderTextColor="#888"
+          value={search}
+          onChangeText={setSearch}
+        />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch("")}>
+            <Ionicons name="close-circle" size={18} color="#aaa" />
+          </TouchableOpacity>
+        )}
       </View>
-      
+
       {loading ? (
-        <ActivityIndicator size="large" color={LIGHT_TEXT_COLOR} style={{ marginTop: 20 }}/>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <ActivityIndicator size="large" color="#3498DB" />
+        </View>
       ) : (
         <FlatList
-          data={products}
-          renderItem={renderProductItem}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContainer}
-          ListEmptyComponent={<Text style={styles.emptyText}>Chưa có sản phẩm nào.</Text>}
+          data={filtered}
+          keyExtractor={(it) => String(it.id)}
+          renderItem={renderItem}
+          contentContainerStyle={{ paddingBottom: 20 }}
+          ListEmptyComponent={
+            <Text style={{ textAlign: "center", color: "#888", marginTop: 40 }}>
+              Không có sản phẩm.
+            </Text>
+          }
         />
       )}
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
   header: {
-    paddingTop: 50,
-    paddingHorizontal: 15,
-    paddingBottom: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: PRIMARY_COLOR,
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight + 10 : 60,
+    paddingBottom: 15, paddingHorizontal: 20,
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
   },
-  backButton: { padding: 5 },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: LIGHT_TEXT_COLOR },
-  addButton: { padding: 5 },
-  listContainer: { padding: 15 },
-  emptyText: { color: LIGHT_TEXT_COLOR, textAlign: 'center', marginTop: 30, fontSize: 16 },
-  
-  productCard: {
-    backgroundColor: LIGHT_TEXT_COLOR,
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    elevation: 2,
+  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "bold" },
+  searchBox: {
+    flexDirection: "row", backgroundColor: "#fff", margin: 12, borderRadius: 25,
+    paddingHorizontal: 15, paddingVertical: 8, alignItems: "center", elevation: 3, gap: 8,
   },
-  productImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    resizeMode: 'contain',
-    marginRight: 10,
+  searchInput: { flex: 1, fontSize: 15, color: "#333" },
+
+  card: {
+    flexDirection: "row", alignItems: "center", backgroundColor: "#fff",
+    marginHorizontal: 12, marginBottom: 10, borderRadius: 12, padding: 10, elevation: 2,
   },
-  productInfo: {
-    flex: 1,
-  },
-  productName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: TEXT_COLOR,
-  },
-  productBrand: {
-    fontSize: 14,
-    color: '#888',
-  },
-  productPrice: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: ACCENT_COLOR,
-  },
-  productActions: {
-    flexDirection: 'row',
-  },
-  actionButton: {
-    padding: 8,
-    marginLeft: 5,
-  },
+  thumbnail: { width: 64, height: 64, borderRadius: 10, marginRight: 10 },
+  name: { fontSize: 15, fontWeight: "bold", color: "#2C3E50" },
+  brand: { fontSize: 13, color: "#7F8C8D", marginTop: 2 },
+  price: { fontSize: 14, fontWeight: "700", color: "#3498DB", marginTop: 6 },
+  stock: { fontSize: 13, color: "#2C3E50", marginTop: 2 },
+  actions: { marginLeft: 8, gap: 6 },
+  iconBtn: { padding: 8, alignItems: "center", justifyContent: "center" },
 });
