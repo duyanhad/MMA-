@@ -254,7 +254,8 @@ export default function OrderDetailScreen({ route, navigation }) {
           <Text style={styles.sectionTitle}>Sản phẩm đã mua</Text>
           <ScrollView style={{ maxHeight: 350 }} nestedScrollEnabled>
             {(Array.isArray(order?.items) ? order.items : []).map((item, index) => {
-              const matched = products.find((p) => p.id === item.product_id);
+              // 🔧 Fix: chuẩn hóa kiểu để ghép đúng sản phẩm
+              const matched = products.find((p) => String(p.id) === String(item.product_id));
               const imageUrl = matched?.image_url || '';
               return (
                 <OrderItemCard

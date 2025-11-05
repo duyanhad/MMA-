@@ -11,7 +11,7 @@ require("dotenv").config({ override: true });
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+app.use("/api/auth", require("./routes/auth"));
 // ================= CONFIG =================
 const MONGO_URI  = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY_123456";
@@ -35,6 +35,26 @@ const docToJson = (doc) => {
   delete json.__v;
   delete json._id;
   return json;
+};
+
+// ✅ Chuẩn hoá Product: Map -> Object cho size_stocks + ép key về string
+const productToJson = (doc) => {
+  if (!doc) return null;
+  const p = doc.toObject ? doc.toObject() : { ...doc };
+
+  delete p.__v;
+  delete p._id;
+
+  if (p.size_stocks instanceof Map) {
+    p.size_stocks = Object.fromEntries(p.size_stocks);
+  }
+  const norm = {};
+  for (const k in p.size_stocks || {}) {
+    norm[String(k)] = Number(p.size_stocks[k] || 0);
+  }
+  p.size_stocks = norm;
+
+  return p;
 };
 
 // ================= SCHEMAS =================
@@ -164,19 +184,36 @@ app.post("/auth/login", async (req, res) => {
 });
 
 // ================= PUBLIC/CUSTOMER APIs =================
-app.get("/api/products", verifyToken, async (req, res) => {
+// 🔄 ĐÃ CHUYỂN /api/products thành PUBLIC (không cần token)
+// và chuẩn hoá size_stocks trước khi trả cho FE.
+app.get("/api/products", async (req, res) => {
   try {
     const brand = req.query.brand;
     const query = brand && brand !== "Tất cả" ? { brand } : {};
-    const products = await Product.find(query).limit(200);
-    res.json(products.map(docToJson));
+    const products = await Product.find(query).sort({ id: 1 }).limit(200);
+    res.json(products.map(productToJson));
   } catch (e) {
     console.error("❌ Lỗi tải sản phẩm:", e);
     res.status(500).json({ message: "Lỗi khi tải sản phẩm." });
   }
 });
 
-app.get("/api/brands", verifyToken, async (req, res) => {
+// ✅ Chi tiết sản phẩm public
+app.get("/api/products/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "ID không hợp lệ." });
+    const p = await Product.findOne({ id });
+    if (!p) return res.status(404).json({ message: "Không tìm thấy sản phẩm." });
+    res.json(productToJson(p));
+  } catch (e) {
+    console.error("❌ Lỗi lấy chi tiết sản phẩm:", e);
+    res.status(500).json({ message: "Lỗi server khi lấy chi tiết sản phẩm." });
+  }
+});
+
+// (tuỳ chọn) list brand có thể public, nếu muốn bắt buộc token hãy thêm verifyToken
+app.get("/api/brands", async (req, res) => {
   try {
     const brands = await Product.distinct("brand");
     res.json(brands);
@@ -304,10 +341,7 @@ app.get("/api/orders", verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-// ================= MOUNT ROUTES (INVENTORY & ORDERS) =================
-// Hai file route này ĐÃ tự kiểm tra verifyToken + isAdmin bên trong.
-// => mount thẳng, không bọc middleware lần nữa.
-// DEBUG: xem app đang kết nối DB nào
+// ================= DEBUG =================
 app.get("/debug/db", (req, res) => {
   const conn = mongoose.connection;
   res.json({
@@ -317,15 +351,18 @@ app.get("/debug/db", (req, res) => {
   });
 });
 
-// DEBUG: liệt kê nhanh vài user (ẩn password)
 app.get("/debug/users", async (req, res) => {
   const users = await User.find({}, "id email role").limit(10);
   res.json(users);
 });
+
+// ================= MOUNT ROUTES (INVENTORY & ORDERS) =================
 const inventoryRoutes = require("./routes/inventory");
 const orderRoutes = require("./routes/orders");
 app.use("/api/admin/inventory", inventoryRoutes);
 app.use("/api/admin/orders", orderRoutes);
+// 🆕 Public detail để FE gọi /api/orders/:id (có verifyToken trong routes)
+app.use("/api/orders", orderRoutes.publicRouter); // <-- thêm dòng này
 
 // ================= SOCKET.IO =================
 const server = http.createServer(app);
@@ -349,7 +386,6 @@ io.on("connection", (socket) => {
 });
 
 // ================= START SERVER =================
-// Giữ nguyên port 3000 như bạn yêu cầu (ưu tiên .env nếu có).
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Server is running on port ${PORT}`);
