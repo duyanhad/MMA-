@@ -1,186 +1,165 @@
 // screens/SearchScreen.jsx
-import React, { useState, useCallback, useEffect } from 'react';
-import { 
-  View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, 
-  ActivityIndicator, Dimensions, Image, Platform, StatusBar, Keyboard, Alert
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, FlatList, Image, TouchableOpacity,
+  ActivityIndicator, StatusBar, Platform, TextInput
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage'; 
-import { CommonActions } from '@react-navigation/native'; 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CommonActions } from '@react-navigation/native';
 
-const PRIMARY_COLOR = '#2C3E50'; 
-const ACCENT_COLOR = '#3498DB'; 
-const TEXT_COLOR = '#333333';
-const LIGHT_TEXT_COLOR = '#FFFFFF';
-const BACKGROUND_COLOR = '#F5F5F5';
-const BORDER_COLOR = '#E0E0E0';
-const ERROR_COLOR = '#E74C3C';
-const API_URL = 'http://192.168.1.102:3000'; 
-
-const formatPrice = (price) => {
-  return price ? price.toLocaleString('vi-VN') + ' đ' : '0 đ';
+const C = {
+  header1: '#184E77', header2: '#1E6091',
+  white: '#FFFFFF', bg: '#F5F8FA', text: '#1F2A37', soft: '#6B7280',
+  border: '#E5E7EB', accent: '#34A0A4', sale: '#FF5C5C'
 };
-
-// 🚀 BẮT BUỘC: Hàm trợ giúp lấy Token
-const getToken = async (navigation) => {
-  const token = await AsyncStorage.getItem('userToken');
-  if (!token) {
-    Alert.alert('Phiên đăng nhập hết hạn', 'Vui lòng đăng nhập lại.');
-    navigation.dispatch(
-      CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] })
-    );
-    return null;
-  }
-  return token;
-};
-
-const ProductCard = ({ product, navigation }) => {
-  const hasDiscount = product.discount > 0;
-  const finalPrice = product.price * (1 - product.discount / 100);
-  return (
-    <TouchableOpacity 
-      style={styles.productCard}
-      activeOpacity={0.8}
-      onPress={() => navigation.navigate('ProductDetail', { product })}
-    >
-      <Image 
-        source={{ uri: product.image_url || 'https://via.placeholder.com/150' }} 
-        style={styles.productImage}
-      />
-      <View style={styles.cardContent}>
-        <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
-        <Text style={styles.productBrand}>Hãng: {product.brand}</Text>
-        <View style={styles.priceContainer}>
-          {hasDiscount && (
-            <Text style={styles.oldPrice}>{formatPrice(product.price)}</Text>
-          )}
-          <Text style={styles.finalPrice}>{formatPrice(finalPrice)}</Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-};
+const API_URL = 'http://192.168.1.102:3000';
+const price = v => (v ? v.toLocaleString('vi-VN') + ' đ' : '0 đ');
 
 export default function SearchScreen({ navigation }) {
-  const [searchText, setSearchText] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
-  const [searchAttempted, setSearchAttempted] = useState(false); 
+  const [list, setList] = useState([]);
+  const [err, setErr] = useState('');
 
-  // 🚀 SỬA: Gửi Token khi gọi API
-  const fetchSearchResults = async (query) => {
-    setSearchAttempted(true);
-    if (!query.trim()) { 
-      setSearchResults([]);
-      setLoading(false);
-      return;
+  const getToken = useCallback(async () => {
+    const t = await AsyncStorage.getItem('userToken');
+    if (!t) {
+      navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] }));
+      return null;
     }
-    setLoading(true);
+    return t;
+  }, [navigation]);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true); setErr('');
     try {
-      const token = await getToken(navigation); 
-      if (!token) return;
-
-      const res = await fetch(`${API_URL}/api/products/search?q=${encodeURIComponent(query.trim())}`, {
-        headers: { 'Authorization': `Bearer ${token}` } 
-      });
-      
-      if (!res.ok) throw new Error('Lỗi khi lấy dữ liệu');
+      const token = await getToken(); if (!token) return;
+      // Reuse /api/products then filter client-side theo từ khóa (tối giản, giữ logic cũ của bạn)
+      const res = await fetch(`${API_URL}/api/products`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
-      setSearchResults(data);
-    } catch (error) {
-      console.error('Lỗi tìm kiếm:', error);
-      setSearchResults([]);
-      if (error.message.includes('Token')) {
-        navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] }));
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+      const k = q.trim().toLowerCase();
+      const filtered = k ? data.filter(p =>
+        (p.name || '').toLowerCase().includes(k) ||
+        (p.brand || '').toLowerCase().includes(k) ||
+        (p.category || '').toLowerCase().includes(k)
+      ) : data;
+      setList(filtered);
+    } catch (e) { setErr('Không thể tải dữ liệu.'); }
+    finally { setLoading(false); }
+  }, [q, getToken]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchSearchResults(searchText);
-    }, 500); 
-    return () => { clearTimeout(timer); };
-  }, [searchText, navigation]); 
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  // ... (Render và Styles giữ nguyên) ...
-  const renderEmptyState = () => {
-    if (loading) {
-      return (
-        <View style={styles.emptyContainer}>
-          <ActivityIndicator size="large" color={ACCENT_COLOR} />
-        </View>
-      );
-    }
-    if (searchAttempted && searchText.trim().length > 0) {
-      return (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="alert-circle-outline" size={60} color="#888" />
-          <Text style={styles.emptyText}>Không tìm thấy sản phẩm nào cho "{searchText}"</Text>
-        </View>
-      );
-    }
+  const Item = ({ item }) => {
+    const hasDiscount = item.discount > 0;
+    const final = item.price * (1 - item.discount / 100);
     return (
-      <View style={styles.emptyContainer}>
-        <Ionicons name="search-outline" size={60} color="#888" />
-        <Text style={styles.emptyText}>Gõ để tìm kiếm sản phẩm hoặc thương hiệu...</Text>
-      </View>
+      <TouchableOpacity
+        style={styles.item}
+        activeOpacity={0.9}
+        onPress={() => navigation.navigate('ProductDetail', { product: item })}
+      >
+        <View style={styles.thumbWrap}>
+          {hasDiscount && (
+            <View style={styles.badge}>
+              <Ionicons name="flash" size={12} color="#fff" style={{ marginRight: 4 }} />
+              <Text style={styles.badgeText}>-{item.discount}%</Text>
+            </View>
+          )}
+          <Image source={{ uri: item.image_url || 'https://via.placeholder.com/200' }} style={styles.thumb} />
+        </View>
+        <View style={styles.info}>
+          <Text style={styles.name} numberOfLines={2}>{item.name}</Text>
+          <Text style={styles.brand} numberOfLines={1}>{item.brand}</Text>
+          <View style={styles.priceRow}>
+            {hasDiscount && <Text style={styles.old}>{price(item.price)}</Text>}
+            <Text style={styles.final}>{price(final)}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
     );
   };
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={PRIMARY_COLOR} />
-      <View style={styles.searchHeader}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={28} color={LIGHT_TEXT_COLOR} />
-        </TouchableOpacity>
-        <View style={styles.searchBar}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Gõ để tìm kiếm..."
-            placeholderTextColor="#888"
-            value={searchText}
-            onChangeText={setSearchText}
-            autoFocus={true} 
-            returnKeyType="search" 
-          />
-          <TouchableOpacity onPress={() => fetchSearchResults(searchText)} style={styles.searchButton}>
-            <Ionicons name="search" size={24} color={PRIMARY_COLOR} />
-          </TouchableOpacity>
-        </View>
-      </View>
 
-      <FlatList
-        data={searchResults}
-        renderItem={({ item }) => <ProductCard product={item} navigation={navigation} />}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={renderEmptyState}
-        keyboardShouldPersistTaps="handled" 
-      />
+  return (
+    <View style={styles.wrap}>
+      <LinearGradient colors={[C.header1, C.header2]} style={styles.header}>
+        <StatusBar barStyle="light-content" backgroundColor={C.header1} />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.navIcon}>
+          <Ionicons name="chevron-back" size={24} color={C.white} />
+        </TouchableOpacity>
+        <View style={styles.searchInput}>
+          <Ionicons name="search" size={18} color="#CFE7F7" />
+          <TextInput
+            value={q}
+            onChangeText={setQ}
+            placeholder="Tìm tên, hãng, danh mục…"
+            placeholderTextColor="#E5F2FB"
+            returnKeyType="search"
+            onSubmitEditing={fetchData}
+            style={styles.input}
+          />
+          {!!q && (
+            <TouchableOpacity onPress={() => setQ('')}>
+              <Ionicons name="close-circle" size={18} color="#E5F2FB" />
+            </TouchableOpacity>
+          )}
+        </View>
+        <TouchableOpacity onPress={fetchData} style={styles.navIcon}>
+          <Ionicons name="arrow-forward-circle" size={26} color={C.white} />
+        </TouchableOpacity>
+      </LinearGradient>
+
+      {loading ? (
+        <View style={styles.center}><ActivityIndicator size="large" color={C.accent} /></View>
+      ) : err ? (
+        <View style={styles.center}>
+          <Text style={{ color: C.sale }}>{err}</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={list}
+          keyExtractor={(i) => i.id?.toString()}
+          renderItem={Item}
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+          contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
+        />
+      )}
     </View>
   );
 }
 
-// ... (Styles giữ nguyên)
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BACKGROUND_COLOR },
-  searchHeader: { paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 50, paddingHorizontal: 10, paddingBottom: 15, flexDirection: 'row', alignItems: 'center', backgroundColor: PRIMARY_COLOR, borderBottomLeftRadius: 15, borderBottomRightRadius: 15 },
-  backButton: { padding: 5, marginRight: 5 },
-  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: LIGHT_TEXT_COLOR, borderRadius: 25, height: 45, paddingHorizontal: 15, alignItems: 'center', elevation: 2 },
-  searchInput: { flex: 1, fontSize: 16, color: TEXT_COLOR },
-  searchButton: { marginLeft: 10, padding: 5 },
-  listContainer: { padding: 10, flexGrow: 1 },
-  productCard: { flexDirection: 'row', backgroundColor: LIGHT_TEXT_COLOR, borderRadius: 10, padding: 10, marginBottom: 10, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 1 }, shadowRadius: 3 },
-  productImage: { width: 80, height: 80, resizeMode: 'contain', borderRadius: 8, marginRight: 10, backgroundColor: '#f9f9f9' },
-  cardContent: { flex: 1, justifyContent: 'center' },
-  productName: { fontSize: 16, fontWeight: 'bold', color: TEXT_COLOR },
-  productBrand: { fontSize: 13, color: '#888', marginBottom: 5 },
-  priceContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  oldPrice: { textDecorationLine: 'line-through', color: '#888', fontSize: 13, marginRight: 5 },
-  finalPrice: { fontSize: 15, fontWeight: '700', color: ACCENT_COLOR },
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 50 },
-  emptyText: { marginTop: 15, fontSize: 16, color: '#888', textAlign: 'center', paddingHorizontal: 40 }
+  wrap: { flex: 1, backgroundColor: C.bg },
+  header: {
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 50,
+    paddingBottom: 12, paddingHorizontal: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 8, elevation: 6,
+    borderBottomLeftRadius: 18, borderBottomRightRadius: 18,
+  },
+  navIcon: { padding: 6 },
+  searchInput: {
+    flex: 1, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 24,
+    paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  input: { flex: 1, color: '#E5F2FB', marginLeft: 8 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  item: {
+    flexDirection: 'row', backgroundColor: C.white, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border, overflow: 'hidden',
+  },
+  thumbWrap: { width: 110, aspectRatio: 1, backgroundColor: '#F4F8FA', position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  thumb: { width: '80%', height: '80%', resizeMode: 'contain' },
+  badge: { position: 'absolute', top: 8, left: 8, backgroundColor: C.sale, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', zIndex: 5, elevation: 5 },
+  badgeText: { color: '#fff', fontWeight: '800', fontSize: 12 },
+  info: { flex: 1, padding: 10, justifyContent: 'center' },
+  name: { color: C.text, fontWeight: '700' },
+  brand: { color: C.soft, fontSize: 12, marginTop: 2 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  old: { color: '#9CA3AF', textDecorationLine: 'line-through', fontSize: 12 },
+  final: { color: C.header2, fontWeight: 'bold', fontSize: 15 },
 });

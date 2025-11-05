@@ -1,64 +1,37 @@
-// routes/admin/orders.js
-const express = require('express');
-const router = express.Router();
-const Order = require('../models/Order');
-const Product = require('../models/Product');
+// models/Order.js
+const mongoose = require('mongoose');
 
-// ✅ Lấy danh sách tất cả đơn hàng (admin xem)
-router.get('/', async (req, res) => {
-  try {
-    const orders = await Order.find().sort({ created_at: -1 });
-    res.status(200).json(orders);
-  } catch (error) {
-    console.error('❌ Lỗi tải đơn hàng:', error);
-    res.status(500).json({ message: 'Lỗi server khi tải đơn hàng.' });
-  }
+const OrderItemSchema = new mongoose.Schema({
+  product_id: Number,      // id số tự tăng của Product
+  name: String,
+  size: String,
+  price: Number,
+  quantity: Number,
+  image_url: String,
 });
 
-// ✅ Cập nhật trạng thái đơn hàng (duyệt / hủy / ... )
-router.put('/:id/status', async (req, res) => {
-  try {
-    const { status } = req.body;
-    const order = await Order.findById(req.params.id);
+const OrderSchema = new mongoose.Schema(
+  {
+    id: { type: Number, unique: true },
+    order_code: String,
+    user_id: Number,
+    customer_name: String,
+    customer_email: String,
+    shipping_address: String,
+    phone_number: String,
+    payment_method: String,
+    notes: { type: String, default: "" },
+    total_amount: Number,
+    items: [OrderItemSchema],
+    status: {
+      type: String,
+      enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],
+      default: "Pending",
+    },
+    created_at: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
 
-    if (!order) {
-      return res.status(404).json({ message: 'Không tìm thấy đơn hàng.' });
-    }
-
-    // 🔹 Nếu đơn từ Pending -> Delivered → trừ sản phẩm trong kho
-    if (order.status !== 'Delivered' && status === 'Delivered') {
-      console.log('🟢 Đơn được duyệt, tiến hành trừ hàng trong kho...');
-      await Promise.all(
-        order.items.map(async (item) => {
-          try {
-            const product = await Product.findById(item.product_id);
-            if (product) {
-              const oldStock = product.stock;
-              const newStock = Math.max(0, oldStock - item.quantity);
-              product.stock = newStock;
-              await product.save();
-              console.log(
-                `🔻 Đã trừ ${item.quantity} sản phẩm "${product.name}" (tồn kho: ${oldStock} → ${newStock})`
-              );
-            } else {
-              console.warn(`⚠️ Không tìm thấy sản phẩm ID: ${item.product_id}`);
-            }
-          } catch (err) {
-            console.error('❌ Lỗi khi cập nhật sản phẩm:', err);
-          }
-        })
-      );
-    }
-
-    // 🔹 Cập nhật trạng thái đơn
-    order.status = status;
-    await order.save();
-
-    res.status(200).json({ message: 'Cập nhật đơn hàng thành công!', order });
-  } catch (error) {
-    console.error('❌ Lỗi cập nhật trạng thái:', error);
-    res.status(500).json({ message: 'Lỗi server khi cập nhật đơn hàng.' });
-  }
-});
-
-module.exports = router;
+// ⚠️ Quan trọng: export đúng Mongoose model
+module.exports = mongoose.models.Order || mongoose.model('Order', OrderSchema);

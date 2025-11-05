@@ -1,226 +1,357 @@
 // screens/AdminProductEdit.jsx
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator, StatusBar, Platform
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  StatusBar,
+  Platform,
+  ActivityIndicator,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-
-import { subscribeSettings } from "../utils/settingsBus";
-import { resolveThemeMode, getGradientColors, getScreenBackground } from "../utils/theme";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const API_URL = "http://192.168.1.102:3000";
-const SETTINGS_KEY = "admin_settings_v1";
+
+const C = {
+  header1: "#184E77",
+  header2: "#1E6091",
+  white: "#fff",
+  bg: "#F5F8FA",
+  text: "#1F2A37",
+  soft: "#6B7280",
+  border: "#E5E7EB",
+  accent: "#34A0A4",
+  danger: "#EF4444",
+  warn: "#FFA726",
+  ok: "#06D6A0",
+};
+
+const num = (v, def = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
 
 export default function AdminProductEdit({ route, navigation }) {
-  const product = route?.params?.product || null;
-
-  const [settings, setSettings] = useState({ theme: "system" });
-  const themeMode = resolveThemeMode(settings.theme);
-  const gradientColors = getGradientColors(themeMode);
-  const screenBg = getScreenBackground(themeMode);
+  const editing = route?.params?.product || null;
 
   const [form, setForm] = useState({
-    name: product?.name || "",
-    brand: product?.brand || "",
-    category: product?.category || "",
-    price: product?.price != null ? String(product.price) : "",
-    discount: product?.discount != null ? String(product.discount) : "0",
-    sizes: Array.isArray(product?.sizes) ? product.sizes.join(",") : "",
-    image_url: product?.image_url || "",
-    description: product?.description || "",
-    stock: product?.stock != null ? String(product.stock) : "0",
+    name: "",
+    brand: "",
+    category: "",
+    price: "",
+    discount: "",
+    description: "",
+    image_url: "",
+    sizesText: "", // nhập nhanh "37,38,39"
   });
 
-  const [saving, setSaving] = useState(false);
-  const isEdit = useMemo(() => !!product?.id, [product]);
+  const [rows, setRows] = useState([]); // [{size:'37', qty:5}, ...]
+  const [loading, setLoading] = useState(false);
 
+  // Load data khi sửa
   useEffect(() => {
-    (async () => {
-      try {
-        const json = await AsyncStorage.getItem(SETTINGS_KEY);
-        if (json) setSettings((p) => ({ ...p, ...JSON.parse(json) }));
-      } catch {}
-    })();
-  }, []);
-  useEffect(() => subscribeSettings((next) => setSettings((p) => ({ ...p, ...next }))), []);
+    if (!editing) return;
+    setForm({
+      name: editing.name || "",
+      brand: editing.brand || "",
+      category: editing.category || "",
+      price: String(editing.price ?? ""),
+      discount: String(editing.discount ?? ""),
+      description: editing.description || "",
+      image_url: editing.image_url || "",
+      sizesText: (editing.sizes || []).join(","),
+    });
 
-  const getToken = useCallback(async () => {
-    const token = await AsyncStorage.getItem("userToken");
-    if (!token) {
-      Alert.alert("Phiên đăng nhập hết hạn", "Vui lòng đăng nhập lại.");
-      return null;
+    // Ưu tiên size_stocks nếu có
+    if (editing.size_stocks && typeof editing.size_stocks === "object") {
+      const arr = Object.entries(editing.size_stocks).map(([k, v]) => ({
+        size: String(k),
+        qty: String(v ?? 0),
+      }));
+      setRows(arr);
+    } else {
+      // Không có size_stocks → nếu có sizes thì khởi tạo qty=0
+      const arr = (editing.sizes || []).map((s) => ({ size: String(s), qty: "0" }));
+      setRows(arr);
     }
-    return token;
-  }, []);
+  }, [editing]);
 
-  const onChange = (patch) => setForm((f) => ({ ...f, ...patch }));
+  // tổng tồn kho theo rows
+  const totalStock = useMemo(
+    () =>
+      rows.reduce((s, r) => s + num(r.qty, 0), 0),
+    [rows]
+  );
 
-  const validate = () => {
-    if (!form.name?.trim()) return "Tên sản phẩm không được bỏ trống.";
-    if (!form.price || isNaN(Number(form.price))) return "Giá không hợp lệ.";
-    if (isNaN(Number(form.discount))) return "Giảm giá không hợp lệ.";
-    if (isNaN(Number(form.stock))) return "Tồn kho không hợp lệ.";
-    return null;
-    };
+  // đồng bộ từ input "sizesText" sang rows nhanh
+  const explodeSizes = () => {
+    if (!form.sizesText?.trim()) {
+      Alert.alert("Thiếu size", "Nhập danh sách size, ví dụ: 37,38,39");
+      return;
+    }
+    const list = form.sizesText
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  const buildPayload = () => {
-    const sizesArr = form.sizes
-      ? form.sizes.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
-    return {
-      name: form.name.trim(),
-      brand: form.brand.trim(),
-      category: form.category.trim(),
-      price: Number(form.price),
-      discount: Number(form.discount || 0),
-      sizes: sizesArr,
-      image_url: form.image_url.trim(),
-      description: form.description.trim(),
-      stock: Number(form.stock || 0),
-      // giữ id cũ khi sửa (backend theo model của bạn có cả "id" auto-increment)
-      ...(product?.id ? { id: product.id } : {}),
-    };
+    // Giữ số lượng cũ nếu đã tồn tại
+    const mapOld = new Map(rows.map((r) => [r.size, r.qty]));
+    const newRows = list.map((sz) => ({
+      size: sz,
+      qty: mapOld.has(sz) ? String(mapOld.get(sz)) : "0",
+    }));
+    setRows(newRows);
   };
 
-  const handleSave = async () => {
-    const msg = validate();
-    if (msg) return Alert.alert("Lỗi", msg);
+  const addRow = () => {
+    setRows((r) => [...r, { size: "", qty: "0" }]);
+  };
 
-    setSaving(true);
+  const removeRow = (idx) => {
+    setRows((r) => r.filter((_, i) => i !== idx));
+  };
+
+  const setRow = (idx, patch) => {
+    setRows((r) => r.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  };
+
+  const save = async () => {
     try {
-      const token = await getToken();
-      if (!token) return;
+      // Validate
+      if (!form.name.trim()) {
+        Alert.alert("Thiếu tên", "Vui lòng nhập tên sản phẩm.");
+        return;
+      }
+      const body = {
+        name: form.name.trim(),
+        brand: form.brand.trim(),
+        category: form.category.trim(),
+        price: num(form.price, 0),
+        discount: num(form.discount, 0),
+        description: form.description.trim(),
+        image_url: form.image_url.trim(),
+      };
 
-      const payload = buildPayload();
-      const url = isEdit
-        ? `${API_URL}/api/admin/inventory/${product.id}`
+      // chuyển rows -> size_stocks object (bỏ size rỗng, qty < 0 => 0)
+      const cleanRows = rows
+        .filter((r) => r.size?.trim())
+        .map((r) => ({ size: r.size.trim(), qty: Math.max(0, num(r.qty, 0)) }));
+
+      if (cleanRows.length > 0) {
+        const sMap = {};
+        cleanRows.forEach((r) => (sMap[r.size] = r.qty));
+        body.size_stocks = sMap;
+        // không cần gửi stock & sizes, server sẽ tự tính
+      } else {
+        // Không quản lý theo size → có thể cho phép nhập stock tổng qua sizesText rỗng
+        // Ở UI này, mình không thêm ô "stock tổng" để tránh rối;
+        // nếu muốn, có thể set body.stock = num(form.stock, 0);
+      }
+
+      setLoading(true);
+      const token = await AsyncStorage.getItem("userToken");
+      if (!token) {
+        Alert.alert("Lỗi", "Phiên đăng nhập hết hạn.");
+        return;
+      }
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      };
+
+      const url = editing
+        ? `${API_URL}/api/admin/inventory/${editing.id}`
         : `${API_URL}/api/admin/inventory`;
 
-      const res = await fetch(url, {
-        method: isEdit ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
+      const method = editing ? "PUT" : "POST";
+      const res = await fetch(url, { method, headers, body: JSON.stringify(body) });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.message || "Lưu sản phẩm thất bại");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Không thể lưu sản phẩm.");
+      }
 
-      Alert.alert("Thành công", isEdit ? "Đã cập nhật sản phẩm." : "Đã thêm sản phẩm.");
-      navigation.goBack(); // quay lại list
+      Alert.alert("Thành công", editing ? "Đã cập nhật sản phẩm." : "Đã tạo sản phẩm.");
+      navigation.goBack();
     } catch (e) {
+      console.error("❌ Lưu sản phẩm lỗi:", e);
       Alert.alert("Lỗi", e.message || "Không thể lưu sản phẩm.");
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: screenBg }}>
-      <LinearGradient colors={gradientColors} style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="chevron-back" size={24} color="#fff" />
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <LinearGradient colors={[C.header1, C.header2]} style={styles.header}>
+        <StatusBar barStyle="light-content" backgroundColor={C.header1} />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
+          <Ionicons name="chevron-back" size={24} color={C.white} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{isEdit ? "Sửa sản phẩm" : "Thêm sản phẩm"}</Text>
-        <View style={{ width: 24 }} />
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {editing ? "Sửa sản phẩm" : "Thêm sản phẩm"}
+        </Text>
+        <View style={{ width: 32 }} />
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={{ padding: 14 }}>
+      <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 100 }}>
+        {/* Thông tin cơ bản */}
         <View style={styles.card}>
-          <Text style={styles.label}>Tên sản phẩm *</Text>
+          <Text style={styles.label}>Tên sản phẩm</Text>
           <TextInput
             style={styles.input}
             value={form.name}
-            onChangeText={(v) => onChange({ name: v })}
-            placeholder="Nhập tên sản phẩm"
+            onChangeText={(t) => setForm((f) => ({ ...f, name: t }))}
+            placeholder="Ví dụ: Nike Air ..."
+            placeholderTextColor={C.soft}
           />
 
-          <Text style={styles.label}>Thương hiệu</Text>
-          <TextInput
-            style={styles.input}
-            value={form.brand}
-            onChangeText={(v) => onChange({ brand: v })}
-            placeholder="VD: Nike, Adidas..."
-          />
-
-          <Text style={styles.label}>Danh mục</Text>
-          <TextInput
-            style={styles.input}
-            value={form.category}
-            onChangeText={(v) => onChange({ category: v })}
-            placeholder="VD: Giày chạy, Sneaker..."
-          />
-
-          <View style={{ flexDirection: "row", gap: 10 }}>
+          <View style={styles.row2}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Giá *</Text>
+              <Text style={styles.label}>Thương hiệu</Text>
               <TextInput
                 style={styles.input}
-                value={form.price}
-                onChangeText={(v) => onChange({ price: v })}
-                keyboardType="numeric"
-                placeholder="VD: 1500000"
+                value={form.brand}
+                onChangeText={(t) => setForm((f) => ({ ...f, brand: t }))}
+                placeholder="Nike / Adidas ..."
+                placeholderTextColor={C.soft}
               />
             </View>
-            <View style={{ width: 110 }}>
-              <Text style={styles.label}>Giảm (%)</Text>
+            <View style={{ width: 10 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Danh mục</Text>
               <TextInput
                 style={styles.input}
-                value={form.discount}
-                onChangeText={(v) => onChange({ discount: v })}
-                keyboardType="numeric"
-                placeholder="0"
+                value={form.category}
+                onChangeText={(t) => setForm((f) => ({ ...f, category: t }))}
+                placeholder="Shoes ..."
+                placeholderTextColor={C.soft}
               />
             </View>
           </View>
 
-          <Text style={styles.label}>Sizes (ngăn cách bằng dấu phẩy)</Text>
-          <TextInput
-            style={styles.input}
-            value={form.sizes}
-            onChangeText={(v) => onChange({ sizes: v })}
-            placeholder="VD: 38,39,40,41,42"
-          />
+          <View style={styles.row2}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Giá (đ)</Text>
+              <TextInput
+                style={styles.input}
+                value={form.price}
+                onChangeText={(t) => setForm((f) => ({ ...f, price: t.replace(/\D/g, "") }))}
+                keyboardType="numeric"
+                placeholder="1990000"
+                placeholderTextColor={C.soft}
+              />
+            </View>
+            <View style={{ width: 10 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Giảm (%)</Text>
+              <TextInput
+                style={styles.input}
+                value={form.discount}
+                onChangeText={(t) => setForm((f) => ({ ...f, discount: t.replace(/\D/g, "") }))}
+                keyboardType="numeric"
+                placeholder="10"
+                placeholderTextColor={C.soft}
+              />
+            </View>
+          </View>
 
           <Text style={styles.label}>Ảnh (URL)</Text>
           <TextInput
             style={styles.input}
             value={form.image_url}
-            onChangeText={(v) => onChange({ image_url: v })}
+            onChangeText={(t) => setForm((f) => ({ ...f, image_url: t }))}
             placeholder="https://..."
+            placeholderTextColor={C.soft}
           />
 
           <Text style={styles.label}>Mô tả</Text>
           <TextInput
-            style={[styles.input, { height: 100, textAlignVertical: "top" }]}
+            style={[styles.input, { height: 90, textAlignVertical: "top" }]}
             value={form.description}
-            onChangeText={(v) => onChange({ description: v })}
-            placeholder="Mô tả sản phẩm"
+            onChangeText={(t) => setForm((f) => ({ ...f, description: t }))}
+            placeholder="Mô tả ngắn..."
+            placeholderTextColor={C.soft}
             multiline
           />
-
-          <Text style={styles.label}>Tồn kho</Text>
-          <TextInput
-            style={styles.input}
-            value={form.stock}
-            onChangeText={(v) => onChange({ stock: v })}
-            keyboardType="numeric"
-            placeholder="0"
-          />
-
-          <TouchableOpacity style={styles.btn} onPress={handleSave} disabled={saving}>
-            {saving ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="save-outline" size={18} color="#fff" />
-                <Text style={styles.btnText}>{isEdit ? "Cập nhật" : "Thêm mới"}</Text>
-              </>
-            )}
-          </TouchableOpacity>
         </View>
+
+        {/* Quản lý size & tồn theo size */}
+        <View style={styles.card}>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>Tồn kho theo size</Text>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <Ionicons name="cube-outline" size={18} color={C.ok} />
+              <Text style={[styles.totalStock, { color: C.ok }]}>
+                {"  "}Tổng: {totalStock}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.sublabel}>Nhập nhanh danh sách size (phân tách dấu phẩy)</Text>
+          <View style={styles.row2}>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              value={form.sizesText}
+              onChangeText={(t) => setForm((f) => ({ ...f, sizesText: t }))}
+              placeholder="VD: 37,38,39"
+              placeholderTextColor={C.soft}
+            />
+            <View style={{ width: 10 }} />
+            <TouchableOpacity style={styles.smallBtn} onPress={explodeSizes}>
+              <Ionicons name="sparkles-outline" size={16} color="#fff" />
+              <Text style={styles.smallBtnTxt}>Tạo size</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Bảng size_stocks */}
+          <View style={{ marginTop: 10 }}>
+            {rows.map((r, idx) => (
+              <View key={`${idx}-${r.size}`} style={styles.sizeRowItem}>
+                <TextInput
+                  style={[styles.input, styles.sizeInput]}
+                  value={r.size}
+                  onChangeText={(t) => setRow(idx, { size: t })}
+                  placeholder="Size"
+                  placeholderTextColor={C.soft}
+                />
+                <TextInput
+                  style={[styles.input, styles.qtyInput]}
+                  value={String(r.qty)}
+                  onChangeText={(t) => setRow(idx, { qty: t.replace(/\D/g, "") })}
+                  placeholder="SL"
+                  keyboardType="numeric"
+                  placeholderTextColor={C.soft}
+                />
+                <TouchableOpacity onPress={() => removeRow(idx)} style={styles.delBtn}>
+                  <Ionicons name="trash-outline" size={18} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ))}
+            <TouchableOpacity style={styles.addBtn} onPress={addRow}>
+              <Ionicons name="add" size={18} color="#fff" />
+              <Text style={styles.addBtnTxt}>Thêm size</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Lưu */}
+        <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="save-outline" size={18} color="#fff" />
+              <Text style={styles.saveText}>{editing ? "Cập nhật" : "Tạo mới"}</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -228,23 +359,88 @@ export default function AdminProductEdit({ route, navigation }) {
 
 const styles = StyleSheet.create({
   header: {
-    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight + 10 : 60,
-    paddingBottom: 15, paddingHorizontal: 20,
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight + 10 : 50,
+    paddingBottom: 12,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    elevation: 6,
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 18,
   },
-  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "bold" },
-
+  iconBtn: { padding: 6 },
+  headerTitle: { flex: 1, color: C.white, fontWeight: "700", fontSize: 16 },
   card: {
-    backgroundColor: "#fff", borderRadius: 12, padding: 14, elevation: 2,
+    backgroundColor: C.white,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 14,
+    marginTop: 12,
   },
-  label: { fontSize: 13, color: "#2C3E50", marginTop: 10, marginBottom: 6, fontWeight: "600" },
+  label: { color: C.text, fontWeight: "700", marginBottom: 6 },
+  sublabel: { color: C.soft, marginBottom: 6 },
   input: {
-    backgroundColor: "#F3F6F9", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
-    color: "#2C3E50",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: C.text,
+    marginBottom: 10,
   },
-  btn: {
-    marginTop: 16, backgroundColor: "#3498DB", borderRadius: 12,
-    alignItems: "center", justifyContent: "center", paddingVertical: 12, flexDirection: "row", gap: 8,
+  row2: { flexDirection: "row", alignItems: "center" },
+  sectionHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
   },
-  btnText: { color: "#fff", fontWeight: "bold" },
+  sectionTitle: { color: C.text, fontWeight: "800" },
+  totalStock: { fontWeight: "800" },
+
+  sizeRowItem: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  sizeInput: { flex: 1, marginRight: 8 },
+  qtyInput: { width: 90, marginRight: 8, textAlign: "right" },
+  delBtn: {
+    backgroundColor: C.danger,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  addBtn: {
+    backgroundColor: C.accent,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 6,
+    flexDirection: "row",
+    gap: 6,
+  },
+  addBtnTxt: { color: "#fff", fontWeight: "800" },
+  smallBtn: {
+    backgroundColor: C.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  smallBtnTxt: { color: "#fff", fontWeight: "800" },
+
+  saveBtn: {
+    backgroundColor: "#1E6091",
+    marginTop: 14,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  saveText: { color: "#fff", fontWeight: "800" },
 });

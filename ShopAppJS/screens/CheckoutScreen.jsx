@@ -1,3 +1,4 @@
+// screens/CheckoutScreen.jsx
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity,
@@ -18,10 +19,13 @@ const LIGHT_TEXT_COLOR = '#FFFFFF';
 const BACKGROUND_COLOR = '#F5F5F5';
 const API_URL = 'http://192.168.1.102:3000'; // ⚠️ đổi thành IP backend của bạn
 
-const formatPrice = (price) => price.toLocaleString('vi-VN') + ' đ';
+// ✅ An toàn khi price undefined/null
+const formatPrice = (price) => Number(price || 0).toLocaleString('vi-VN') + ' đ';
 
 export default function CheckoutScreen({ route, navigation }) {
-  const { cartItems, totalAmount } = route.params;
+  // ✅ Lấy params an toàn
+  const { cartItems = [], totalAmount = 0 } = route?.params ?? {};
+
   const [userInfo, setUserInfo] = useState(null);
   const [recipientName, setRecipientName] = useState('');
   const [shippingAddress, setShippingAddress] = useState('');
@@ -77,6 +81,7 @@ export default function CheckoutScreen({ route, navigation }) {
       paymentMethod === 'BANK' ? selectedBank :
       paymentMethod === 'WALLET' ? selectedWallet : 'COD';
 
+    // ✅ Fallback an toàn cho từng field trong items
     const orderData = {
       userId: userInfo.id,
       customerName: recipientName,
@@ -86,14 +91,14 @@ export default function CheckoutScreen({ route, navigation }) {
       paymentMethod,
       paymentDetail,
       notes,
-      totalAmount,
-      items: cartItems.map(item => ({
-        product_id: item.id,
-        name: item.name,
-        size: item.selectedSize,
-        price: item.final_price,
-        quantity: item.quantity,
-        image_url: item.image_url,
+      totalAmount: Number(totalAmount || 0),
+      items: (cartItems || []).map(item => ({
+        product_id: item?.product_id ?? item?.id,
+        name: item?.name ?? '',
+        size: item?.selectedSize ?? item?.size ?? '',
+        price: Number(item?.final_price ?? item?.price ?? 0),
+        quantity: Number(item?.quantity ?? 1),
+        image_url: item?.image_url ?? '',
       })),
     };
 
@@ -112,9 +117,9 @@ export default function CheckoutScreen({ route, navigation }) {
             routes: [{ name: 'ThankYou', params: { cartItems, totalAmount } }],
           })
         );
-      } else throw new Error(data.message);
+      } else throw new Error(data?.message || 'Không thể đặt hàng, vui lòng thử lại.');
     } catch (e) {
-      Alert.alert('Lỗi', e.message);
+      Alert.alert('Lỗi', e.message || 'Không thể đặt hàng, vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
@@ -189,14 +194,18 @@ export default function CheckoutScreen({ route, navigation }) {
           <View style={styles.productList}>
             <Text style={styles.sectionTitleBlack}>Sản phẩm trong đơn hàng</Text>
             <ScrollView style={styles.productScroll}>
-              {cartItems.map((item, i) => (
+              {(cartItems || []).map((item, i) => (
                 <View key={i} style={styles.productItem}>
-                  <Image source={{ uri: item.image_url }} style={styles.productImage} />
+                  <Image source={{ uri: item?.image_url || 'https://via.placeholder.com/150' }} style={styles.productImage} />
                   <View style={styles.productInfo}>
-                    <Text style={styles.productName}>{item.name}</Text>
-                    <Text style={styles.productDetail}>Size: {item.selectedSize}</Text>
-                    <Text style={styles.productDetail}>SL: {item.quantity} × {formatPrice(item.final_price)}</Text>
-                    <Text style={styles.productSubtotal}>Thành tiền: {formatPrice(item.final_price * item.quantity)}</Text>
+                    <Text style={styles.productName}>{item?.name || 'Sản phẩm'}</Text>
+                    <Text style={styles.productDetail}>Size: {item?.selectedSize ?? item?.size ?? '-'}</Text>
+                    <Text style={styles.productDetail}>
+                      SL: {Number(item?.quantity ?? 1)} × {formatPrice(item?.final_price ?? item?.price)}
+                    </Text>
+                    <Text style={styles.productSubtotal}>
+                      Thành tiền: {formatPrice(Number(item?.final_price ?? item?.price) * Number(item?.quantity ?? 1))}
+                    </Text>
                   </View>
                 </View>
               ))}
