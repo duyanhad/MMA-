@@ -23,10 +23,7 @@ console.log(
 );
 
 // ================= DB CONNECT =================
-mongoose
-  .connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 })
-  .then(() => console.log("✅ Connected to MongoDB Atlas"))
-  .catch((e) => console.error("❌ MongoDB connection error:", e.message));
+
 
 // ================= HELPERS =================
 const docToJson = (doc) => {
@@ -315,8 +312,34 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => console.log("❌ Disconnected:", socket.id));
 });
 
-// ================= START SERVER =================
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Server is running on port ${PORT}`);
+app.get("/health", (req, res) => {
+  const state = mongoose.connection.readyState; // 1 = connected
+  res.status(200).json({
+    ok: state === 1,
+    state, // 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
+    db: mongoose.connection.name || null
+  });
 });
+
+const PORT = process.env.PORT || 3000;
+
+async function start() {
+  try {
+    // tăng timeout để cold start Render ổn định hơn
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 30000,       // 30s
+      socketTimeoutMS: 45000,                // tùy chọn, an toàn hơn
+    });
+    console.log("✅ Connected to MongoDB Atlas");
+
+    // Lắng nghe bằng server (để socket.io hoạt động)
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`✅ Server is running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error("❌ Mongo connect failed:", err.message);
+    // Thử lại sau 5s để tránh 502 khi Atlas delay
+    setTimeout(start, 5000);
+  }
+}
+start();
