@@ -18,8 +18,11 @@ import { resolveThemeMode, getGradientColors, getScreenBackground } from "../uti
 
 moment.locale("vi");
 
-const API_URL = "http://192.168.1.103:3000";
-const SOCKET_URL = "http://192.168.1.103:3000";
+// const API_URL = "http://192.168.1.103:3000";
+// const SOCKET_URL = "http://192.168.1.103:3000";
+
+const API_URL = "https://mma-3kpy.onrender.com";
+const SOCKET_URL = "https://mma-3kpy.onrender.com";
 const SETTINGS_KEY = "admin_settings_v1";
 
 const { width: SCREEN_W } = Dimensions.get("window");

@@ -24,7 +24,8 @@ import { CommonActions } from '@react-navigation/native';
 
 moment.locale('vi');
 
-const API_URL = 'http://192.168.1.103:3000';
+// const API_URL = 'http://192.168.1.103:3000';
+const API_URL = 'https://mma-3kpy.onrender.com';
 const PLACEHOLDER_IMG = 'https://via.placeholder.com/120x120?text=No+Image';
 const HEADER_MAX_HEIGHT = 120;
 const HEADER_MIN_HEIGHT = 70;

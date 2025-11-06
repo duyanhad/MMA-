@@ -14,7 +14,8 @@ const C = {
   white: '#FFFFFF', bg: '#F5F8FA', text: '#1F2A37', soft: '#6B7280',
   border: '#E5E7EB', accent: '#34A0A4', sale: '#FF5C5C'
 };
-const API_URL = 'http://192.168.1.103:3000';
+// const API_URL = 'http://192.168.1.103:3000';
+const API_URL = 'https://mma-3kpy.onrender.com';
 const price = v => (v ? v.toLocaleString('vi-VN') + ' đ' : '0 đ');
 
 export default function SearchScreen({ navigation }) {

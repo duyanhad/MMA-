@@ -26,7 +26,8 @@ const C = {
   sale:    '#FF5C5C',
 };
 
-const API_URL = 'http://192.168.1.103:3000';
+// const API_URL = 'http://192.168.1.103:3000';
+const API_URL = 'https://mma-3kpy.onrender.com';
 const formatPrice = (v) => (v ? v.toLocaleString('vi-VN') + ' đ' : '0 đ');
 
 const Chip = ({ label, active, onPress }) => (

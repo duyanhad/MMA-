@@ -17,8 +17,8 @@ const SECONDARY_COLOR = '#34495E';
 const ACCENT_COLOR = '#3498DB';
 const LIGHT_TEXT_COLOR = '#FFFFFF';
 const BACKGROUND_COLOR = '#F5F5F5';
-const API_URL = 'http://192.168.1.103:3000'; // ⚠️ đổi thành IP backend của bạn
-
+// const API_URL = 'http://192.168.1.103:3000'; // ⚠️ đổi thành IP backend của bạn
+const API_URL = 'https://mma-3kpy.onrender.com';
 // ✅ An toàn khi price undefined/null
 const formatPrice = (price) => Number(price || 0).toLocaleString('vi-VN') + ' đ';
 

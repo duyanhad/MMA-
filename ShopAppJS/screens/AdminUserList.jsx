@@ -24,7 +24,8 @@ import {
   getScreenBackground,
 } from "../utils/theme";
 
-const API_URL = "http://192.168.1.103:3000";
+// const API_URL = "http://192.168.1.103:3000";
+const API_URL = "https://mma-3kpy.onrender.com";
 const SETTINGS_KEY = "admin_settings_v1";
 
 const ROLE_TABS = [

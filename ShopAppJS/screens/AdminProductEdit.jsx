@@ -16,8 +16,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_URL = "http://192.168.1.103:3000";
-
+const API_URL = "https://mma-3kpy.onrender.com";
+// const API_URL = "http://192.168.1.103:3000";
 const C = {
   header1: "#184E77",
   header2: "#1E6091",
