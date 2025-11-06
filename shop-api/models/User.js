@@ -1,31 +1,38 @@
-// models/User.js
+// shop-api/models/User.js
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
-    // Để khớp với app.js (JWT đang dùng user.id)
-    id:       { type: Number, unique: true, sparse: true },
+    // để khớp với các API khác (JWT dùng user.id)
+    id:        { type: Number, unique: true, sparse: true },
 
-    // Schema cũ yêu cầu username — giữ lại để tương thích
-    username: { type: String, required: true },
+    // tên hiển thị
+    name:      { type: String, required: true },
 
-    // BE hiện tạo bằng trường "name" => chấp nhận luôn
-    name:     { type: String },
+    // yêu cầu username, nhưng mặc định lấy từ name
+    username:  {
+      type: String,
+      required: true,
+      default: function () {
+        return this.name;
+      },
+      trim: true,
+    },
 
-    email:    { type: String, required: true, unique: true, index: true },
-    password: { type: String, required: true },
+    email:     { type: String, required: true, unique: true, index: true, trim: true },
+    password:  { type: String, required: true },
 
-    role:     { type: String, default: "customer" }, // "admin" | "customer"
-    isBlocked:{ type: Boolean, default: false },
+    role:      { type: String, default: "customer" }, // "admin" | "customer"
+    isBlocked: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-// Nếu chỉ gửi "name" mà thiếu "username", tự map trước khi lưu
+// Backup: nếu vì lý do gì đó default chưa set, đảm bảo username có giá trị trước khi save
 userSchema.pre("save", function (next) {
   if (!this.username && this.name) this.username = this.name;
   next();
 });
 
-// Tránh OverwriteModelError khi hot-reload/nodemon
+// Tránh OverwriteModelError khi nodemon reload
 module.exports = mongoose.models.User || mongoose.model("User", userSchema);

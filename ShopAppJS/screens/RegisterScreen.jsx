@@ -14,10 +14,9 @@ import {
 import CustomInput from '../components/CustomInput';
 import { LinearGradient } from 'expo-linear-gradient';
 
-// 1. SỬA LỖI IP Ở ĐÂY
+// ⚙️ Đặt đúng IP backend của bạn
 const API_URL = 'http://192.168.1.103:3000';
 
-// 2. Phải là "export default"
 export default function RegisterScreen({ navigation }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -29,14 +28,14 @@ export default function RegisterScreen({ navigation }) {
       return;
     }
     try {
-      // 3. Sửa fetch URL
-      const res = await fetch(`${API_URL}/auth/register`, { 
+      const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password }),
       });
       const data = await res.json();
-      if (res.ok) { 
+
+      if (res.ok) {
         Alert.alert('Thành công', 'Đăng ký thành công! Vui lòng đăng nhập.');
         navigation.navigate('Login');
       } else {
@@ -44,7 +43,7 @@ export default function RegisterScreen({ navigation }) {
       }
     } catch (err) {
       console.error(err);
-      Alert.alert('Lỗi', 'Lỗi kết nối server. Vui lòng kiểm tra lại mạng.');
+      Alert.alert('Lỗi', 'Không thể kết nối tới server. Vui lòng kiểm tra lại mạng.');
     }
   };
 
@@ -56,42 +55,46 @@ export default function RegisterScreen({ navigation }) {
       >
         <ScrollView contentContainerStyle={styles.container}>
           <Image
-            source={{ uri: 'https://pos.nvncdn.com/c47d80-44932/store/20230311_c3qYR3MY.jpg?v=1678520204' }} // Thay bằng ảnh logo của bạn nếu có
+            source={{
+              uri: 'https://pos.nvncdn.com/c47d80-44932/store/20230311_c3qYR3MY.jpg?v=1678520204',
+            }}
             style={styles.logo}
           />
           <Text style={styles.title}>ĐĂNG KÝ</Text>
 
+          {/* Họ tên */}
           <CustomInput
             placeholder="Tên của bạn"
             iconName="person-outline"
             value={name}
             setValue={setName}
           />
+
+          {/* Email */}
           <CustomInput
             placeholder="Email"
             iconName="mail-outline"
             value={email}
             setValue={setEmail}
           />
+
+          {/* Mật khẩu */}
           <CustomInput
             placeholder="Mật khẩu"
-            iconName="lock-outline"
+            iconName="lock-closed-outline" // ✅ ĐÃ SỬA Ở ĐÂY
             value={password}
             setValue={setPassword}
             secureTextEntry
           />
 
-          {/* Register Button */}
+          {/* Nút đăng ký */}
           <TouchableOpacity onPress={handleRegister} activeOpacity={0.8}>
-            <LinearGradient
-              colors={['#FF6F61', '#FF9A8B']}
-              style={styles.buttonGradient}
-            >
+            <LinearGradient colors={['#FF6F61', '#FF9A8B']} style={styles.buttonGradient}>
               <Text style={styles.buttonText}>ĐĂNG KÝ</Text>
             </LinearGradient>
           </TouchableOpacity>
 
-          {/* Login Link */}
+          {/* Link đăng nhập */}
           <TouchableOpacity onPress={() => navigation.navigate('Login')} activeOpacity={0.7}>
             <Text style={styles.link}>Đã có tài khoản? Đăng nhập</Text>
           </TouchableOpacity>
@@ -100,7 +103,7 @@ export default function RegisterScreen({ navigation }) {
     </LinearGradient>
   );
 }
-// (Copy toàn bộ Styles từ file RegisterScreen.jsx cũ của bạn vào đây)
+
 const styles = StyleSheet.create({
   background: { flex: 1 },
   container: {

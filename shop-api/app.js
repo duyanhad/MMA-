@@ -6,12 +6,14 @@ const moment = require("moment");
 const jwt = require("jsonwebtoken");
 const http = require("http");
 const { Server } = require("socket.io");
+const bcrypt = require("bcryptjs"); // ✅ dùng để hash/compare mật khẩu
 require("dotenv").config({ override: true });
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", require("./routes/auth"));
+
 // ================= CONFIG =================
 const MONGO_URI  = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY_123456";
@@ -58,7 +60,6 @@ const productToJson = (doc) => {
 };
 
 /* ================= MODELS (fix lỗi OverwriteModelError) ================ */
-// ❗ Thay cho toàn bộ khối SCHEMAS cũ: chỉ import model đã định nghĩa sẵn
 const User    = require("./models/User");
 const Product = require("./models/Product");
 const Order   = require("./models/Order");
@@ -82,30 +83,70 @@ const isAdmin = (req, res, next) => {
 };
 
 // ================= AUTH =================
+// ✅ REGISTER: map name->username, tự tăng id, hash mật khẩu, bắt lỗi rõ ràng
 app.post("/auth/register", async (req, res) => {
-  const { name, email, password } = req.body;
   try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Thiếu thông tin bắt buộc." });
+    }
+
     const exists = await User.findOne({ email });
     if (exists) return res.status(409).json({ message: "Email đã tồn tại." });
 
-    const last = await User.findOne().sort({ id: -1 });
-    const nextId = last ? last.id + 1 : 1;
+    const last = await User.findOne().sort({ id: -1 }).lean();
+    const nextId = last ? Number(last.id) + 1 : 1;
 
-    const user = new User({ id: nextId, name, email, password });
+    const hashed = await bcrypt.hash(password, 10);
+
+    const user = new User({
+      id: nextId,
+      name,
+      username: name, // phòng khi pre-save không chạy
+      email,
+      password: hashed,
+      role: "customer",
+    });
+
     await user.save();
-    res.status(201).json({ message: "Đăng ký thành công!", user: docToJson(user) });
+    res.status(201).json({
+      message: "Đăng ký thành công!",
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    });
   } catch (e) {
     console.error("❌ Lỗi đăng ký:", e);
+    if (e && e.code === 11000) {
+      return res.status(409).json({ message: "Email đã được sử dụng." });
+    }
+    if (e && e.name === "ValidationError") {
+      const details = Object.values(e.errors).map(er => er.message).join("; ");
+      return res.status(400).json({ message: `Dữ liệu không hợp lệ: ${details}` });
+    }
     res.status(500).json({ message: "Lỗi server khi đăng ký." });
   }
 });
 
+// ✅ LOGIN: tìm theo email, so sánh bcrypt, giữ JWT { userId: user.id }
 app.post("/auth/login", async (req, res) => {
-  const { email, password } = req.body;
   try {
-    const user = await User.findOne({ email, password });
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
     if (!user) return res.status(401).json({ message: "Sai tài khoản hoặc mật khẩu." });
     if (user.isBlocked) return res.status(403).json({ message: "Tài khoản đã bị khóa." });
+
+  let ok = false;
+
+// Nếu user.password là hash bcrypt thì so sánh bình thường
+if (user.password.startsWith("$2a$") || user.password.startsWith("$2b$")) {
+  ok = await bcrypt.compare(password, user.password);
+} else {
+  // Nếu mật khẩu lưu dạng thường (plaintext), so sánh trực tiếp
+  ok = user.password === password;
+}
+
+if (!ok) return res.status(401).json({ message: "Sai tài khoản hoặc mật khẩu." });
 
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
@@ -330,7 +371,7 @@ async function start() {
     });
   } catch (err) {
     console.error("❌ Mongo connect failed:", err.message);
-    // thử lại sau 5s (tránh chết service -> 502)
+    // thử lại sau 5s
     setTimeout(start, 5000);
   }
 }

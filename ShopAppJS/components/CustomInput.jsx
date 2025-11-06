@@ -1,12 +1,11 @@
 // components/CustomInput.jsx
 import React, { useState } from 'react';
 import { View, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
-// 🚀 FIX: Đổi từ MaterialIcons sang Ionicons
 import { Ionicons } from '@expo/vector-icons'; 
 
 export default function CustomInput({ 
   value, 
-  onChangeText, // Đảm bảo dùng tên prop chuẩn
+  setValue,        // ✅ khớp với RegisterScreen.jsx
   placeholder, 
   secureTextEntry, 
   iconName,
@@ -21,7 +20,6 @@ export default function CustomInput({
   return (
     <View style={[styles.container, isFocused && styles.focusedContainer]}>
       {iconName && (
-        // 🚀 FIX: Sử dụng Ionicons
         <Ionicons
           name={iconName}
           size={24}
@@ -31,7 +29,7 @@ export default function CustomInput({
       )}
       <TextInput
         value={value}
-        onChangeText={onChangeText} // Sử dụng prop onChangeText
+        onChangeText={setValue}   // ✅ dùng đúng prop
         placeholder={placeholder}
         placeholderTextColor="rgba(255,255,255,0.7)"
         secureTextEntry={secureTextEntry && !showPassword}
@@ -44,7 +42,6 @@ export default function CustomInput({
       />
       {secureTextEntry && (
         <TouchableOpacity onPress={togglePassword} style={styles.eyeIcon}>
-          {/* 🚀 FIX: Sử dụng Ionicons (tên icon mắt cũng thay đổi) */}
           <Ionicons
             name={showPassword ? 'eye-outline' : 'eye-off-outline'}
             size={24}
@@ -79,7 +76,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#FFFFFF', // Đảm bảo màu chữ là TRẮNG
+    color: '#FFFFFF',
     paddingVertical: 0,
   },
   eyeIcon: {
