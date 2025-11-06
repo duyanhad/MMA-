@@ -57,76 +57,12 @@ const productToJson = (doc) => {
   return p;
 };
 
-// ================= SCHEMAS =================
-const userSchema = new mongoose.Schema(
-  {
-    id: { type: Number, unique: true },
-    name: String,
-    email: String,
-    password: String,
-    role: { type: String, enum: ["customer", "admin"], default: "customer" },
-    isBlocked: { type: Boolean, default: false },
-    created_at: { type: Date, default: Date.now },
-  },
-  { timestamps: true }
-);
-const User = mongoose.model("User", userSchema);
-
-// ✅ Hỗ trợ tồn kho theo size qua Map
-const productSchema = new mongoose.Schema(
-  {
-    id: { type: Number, unique: true },
-    name: { type: String, required: true },
-    brand: String,
-    category: String,
-    price: { type: Number, required: true },
-    discount: { type: Number, default: 0 },
-    description: { type: String, default: "" },
-    image_url: { type: String, default: "" },
-    material: { type: String, default: "" },
-
-    stock: { type: Number, default: 0 }, // tổng tồn kho
-    size_stocks: { type: Map, of: Number, default: {} }, // tồn theo size
-    sizes: [String],
-
-    created_at: { type: Date, default: Date.now },
-  },
-  { timestamps: true }
-);
-const Product = mongoose.model("Product", productSchema);
-
-const orderItemSchema = new mongoose.Schema({
-  product_id: Number, // id số tự tăng của Product
-  name: String,
-  size: String,
-  price: Number,
-  quantity: Number,
-  image_url: String,
-});
-
-const orderSchema = new mongoose.Schema(
-  {
-    id: { type: Number, unique: true },
-    order_code: String,
-    user_id: Number,
-    customer_name: String,
-    customer_email: String,
-    shipping_address: String,
-    phone_number: String,
-    payment_method: String,
-    notes: { type: String, default: "" },
-    total_amount: Number,
-    items: [orderItemSchema],
-    status: {
-      type: String,
-      enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],
-      default: "Pending",
-    },
-    created_at: { type: Date, default: Date.now },
-  },
-  { timestamps: true }
-);
-const Order = mongoose.model("Order", orderSchema);
+/* ================= MODELS (fix lỗi OverwriteModelError) ================ */
+// ❗ Thay cho toàn bộ khối SCHEMAS cũ: chỉ import model đã định nghĩa sẵn
+const User    = require("./models/User");
+const Product = require("./models/Product");
+const Order   = require("./models/Order");
+/* ====================================================================== */
 
 // ================= MIDDLEWARE =================
 const verifyToken = (req, res, next) => {
@@ -184,8 +120,6 @@ app.post("/auth/login", async (req, res) => {
 });
 
 // ================= PUBLIC/CUSTOMER APIs =================
-// 🔄 ĐÃ CHUYỂN /api/products thành PUBLIC (không cần token)
-// và chuẩn hoá size_stocks trước khi trả cho FE.
 app.get("/api/products", async (req, res) => {
   try {
     const brand = req.query.brand;
@@ -212,7 +146,6 @@ app.get("/api/products/:id", async (req, res) => {
   }
 });
 
-// (tuỳ chọn) list brand có thể public, nếu muốn bắt buộc token hãy thêm verifyToken
 app.get("/api/brands", async (req, res) => {
   try {
     const brands = await Product.distinct("brand");
@@ -273,7 +206,6 @@ app.post("/api/orders", verifyToken, async (req, res) => {
 
     await newOrder.save();
 
-    // 🔔 thông báo admin
     try {
       req.app.get("socketio")?.emit("newOrder", {
         id: newOrder.id,
@@ -285,7 +217,6 @@ app.post("/api/orders", verifyToken, async (req, res) => {
       });
     } catch {}
 
-    // 🔔 thông báo riêng KH (room user-<id>)
     try {
       req.app.get("socketio")?.to(`user-${newOrder.user_id}`).emit("userOrderCreated", {
         id: newOrder.id,
@@ -372,7 +303,6 @@ app.set("socketio", io);
 io.on("connection", (socket) => {
   console.log("✅ Socket connected:", socket.id);
 
-  // Client gọi ngay sau khi connect để vào phòng theo userId
   socket.on("registerUser", (userId) => {
     const n = Number(userId);
     if (Number.isFinite(n)) {

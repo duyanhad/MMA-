@@ -15,7 +15,7 @@ import CustomInput from '../components/CustomInput';
 import { LinearGradient } from 'expo-linear-gradient';
 
 // 1. SỬA LỖI IP Ở ĐÂY
-const API_URL = 'http://192.168.1.102:3000';
+const API_URL = 'http://192.168.1.103:3000';
 
 // 2. Phải là "export default"
 export default function RegisterScreen({ navigation }) {

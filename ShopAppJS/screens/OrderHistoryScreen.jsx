@@ -26,7 +26,7 @@ const LIGHT_TEXT_COLOR = '#FFFFFF';
 const BORDER_COLOR = '#BDC3C7';
 const BACKGROUND_COLOR = '#F5F5F5';
 
-const API_URL = 'http://192.168.1.102:3000';
+const API_URL = 'http://192.168.1.103:3000';
 
 // 💰 Định dạng tiền
 const formatPrice = (price) => {

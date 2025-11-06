@@ -22,7 +22,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width } = Dimensions.get("window");
-const API_URL = "http://192.168.1.102:3000";
+const API_URL = "http://192.168.1.103:3000";
 
 const TABS = [
   { key: "all", label: "Tất cả" },

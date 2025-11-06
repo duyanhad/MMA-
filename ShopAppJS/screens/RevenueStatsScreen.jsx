@@ -18,8 +18,8 @@ import { resolveThemeMode, getGradientColors, getScreenBackground } from "../uti
 
 moment.locale("vi");
 
-const API_URL = "http://192.168.1.102:3000";
-const SOCKET_URL = "http://192.168.1.102:3000";
+const API_URL = "http://192.168.1.103:3000";
+const SOCKET_URL = "http://192.168.1.103:3000";
 const SETTINGS_KEY = "admin_settings_v1";
 
 const { width: SCREEN_W } = Dimensions.get("window");
