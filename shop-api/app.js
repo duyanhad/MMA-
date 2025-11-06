@@ -157,9 +157,15 @@ app.get("/api/brands", async (req, res) => {
 });
 
 // Khách đặt hàng
+// Khách đặt hàng (Checkout) — lấy userId từ token, KHÔNG dùng userId trong body
 app.post("/api/orders", verifyToken, async (req, res) => {
+  const uid = Number(req.user.userId); // userId từ JWT
+  if (!Number.isFinite(uid)) {
+    return res.status(401).json({ message: "Token không hợp lệ." });
+  }
+
   const {
-    userId,
+    // userId,  // <-- KHÔNG DÙNG userId từ body nữa
     customerName,
     shippingAddress,
     phoneNumber,
@@ -169,10 +175,73 @@ app.post("/api/orders", verifyToken, async (req, res) => {
     notes,
   } = req.body;
 
-  if (req.user.userId !== userId)
-    return res.status(403).json({ message: "Token không khớp với người dùng." });
-
   try {
+    const last = await Order.findOne().sort({ id: -1 });
+    const nextId = last ? last.id + 1 : 1;
+    const orderCode = `#S${moment().format("YYYY")}${(nextId % 10000)
+      .toString()
+      .padStart(4, "0")}`;
+
+    const orderItems = (items || []).map((i) => ({
+      product_id: i.product_id,
+      name: i.name,
+      size: i.size || "",
+      price: i.price,
+      quantity: i.quantity,
+      image_url: i.image_url || "",
+    }));
+
+    const newOrder = new Order({
+      id: nextId,
+      order_code: orderCode,
+      user_id: uid, // lấy từ token
+      customer_name: customerName,
+      customer_email: req.user.email,
+      shipping_address: shippingAddress,
+      phone_number: phoneNumber,
+      payment_method: paymentMethod || "COD",
+      notes: notes || "",
+      total_amount: totalAmount,
+      items: orderItems,
+      status: "Pending",
+      created_at: moment().toISOString(),
+    });
+
+    await newOrder.save();
+
+    try {
+      req.app.get("socketio")?.emit("newOrder", {
+        id: newOrder.id,
+        order_code: newOrder.order_code,
+        customer_name: newOrder.customer_name,
+        total_amount: newOrder.total_amount,
+        created_at: newOrder.created_at,
+        status: "Pending",
+      });
+    } catch {}
+
+    try {
+      req.app.get("socketio")
+        ?.to(`user-${newOrder.user_id}`)
+        .emit("userOrderCreated", {
+          id: newOrder.id,
+          order_code: newOrder.order_code,
+          status: newOrder.status,
+          total_amount: newOrder.total_amount,
+          created_at: newOrder.created_at,
+        });
+    } catch {}
+
+    res.status(201).json({
+      message: "Đặt hàng thành công!",
+      order: docToJson(newOrder),
+    });
+  } catch (e) {
+    console.error("❌ Lỗi khi tạo đơn:", e);
+    res.status(500).json({ message: "Lỗi server khi đặt hàng." });
+  }
+});
+try {
     const last = await Order.findOne().sort({ id: -1 });
     const nextId = last ? last.id + 1 : 1;
     const orderCode = `#S${moment().format("YYYY")}${(nextId % 10000)
@@ -336,3 +405,34 @@ async function start() {
 }
 
 start();
+
+// ===== AUTO-APPENDED PATCHES =====
+// NOTE: Could not auto-locate existing app.get('/api/orders/history', ...) block. Appending patched version below.
+// Lịch sử đơn hàng — cho phép /api/orders/history/me hoặc /api/orders/history/:userId
+app.get("/api/orders/history/:userId?", verifyToken, async (req, res) => {
+  try {
+    const me = Number(req.user.userId);
+    const param = req.params.userId;
+    const targetId =
+      param === undefined || param === "me" ? me : Number(param);
+
+    if (!Number.isFinite(targetId)) {
+      return res.status(400).json({ message: "ID không hợp lệ." });
+    }
+
+    // Non-admin chỉ được xem lịch sử của chính mình
+    if (req.user.role !== "admin" && me !== targetId) {
+      return res
+        .status(403)
+        .json({ message: "Không có quyền xem lịch sử của người khác." });
+    }
+
+    const orders = await Order.find({ user_id: targetId }).sort({
+      created_at: -1,
+    });
+    res.json(orders.map(docToJson));
+  } catch (e) {
+    console.error("❌ Lỗi tải lịch sử đơn:", e);
+    res.status(200).json([]);
+  }
+});
