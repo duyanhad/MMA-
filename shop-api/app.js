@@ -12,8 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", require("./routes/auth"));
+
 // ================= CONFIG =================
-const MONGO_URI  = process.env.MONGO_URI;
+const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY_123456";
 
 // (tuỳ chọn) in ra để kiểm tra đã đọc đúng .env, nhưng ẩn user/pass:
@@ -58,10 +59,9 @@ const productToJson = (doc) => {
 };
 
 /* ================= MODELS (fix lỗi OverwriteModelError) ================ */
-// ❗ Thay cho toàn bộ khối SCHEMAS cũ: chỉ import model đã định nghĩa sẵn
-const User    = require("./models/User");
+const User = require("./models/User");
 const Product = require("./models/Product");
-const Order   = require("./models/Order");
+const Order = require("./models/Order");
 /* ====================================================================== */
 
 // ================= MIDDLEWARE =================
@@ -156,8 +156,8 @@ app.get("/api/brands", async (req, res) => {
   }
 });
 
-// Khách đặt hàng
-// Khách đặt hàng (Checkout) — lấy userId từ token, KHÔNG dùng userId trong body
+// ================= CHECKOUT (KH đặt hàng) =================
+// Lấy userId từ token, KHÔNG dùng userId trong body
 app.post("/api/orders", verifyToken, async (req, res) => {
   const uid = Number(req.user.userId); // userId từ JWT
   if (!Number.isFinite(uid)) {
@@ -165,7 +165,6 @@ app.post("/api/orders", verifyToken, async (req, res) => {
   }
 
   const {
-    // userId,  // <-- KHÔNG DÙNG userId từ body nữa
     customerName,
     shippingAddress,
     phoneNumber,
@@ -209,6 +208,7 @@ app.post("/api/orders", verifyToken, async (req, res) => {
 
     await newOrder.save();
 
+    // socket: broadcast tới admin + room của user
     try {
       req.app.get("socketio")?.emit("newOrder", {
         id: newOrder.id,
@@ -221,7 +221,8 @@ app.post("/api/orders", verifyToken, async (req, res) => {
     } catch {}
 
     try {
-      req.app.get("socketio")
+      req.app
+        .get("socketio")
         ?.to(`user-${newOrder.user_id}`)
         .emit("userOrderCreated", {
           id: newOrder.id,
@@ -241,83 +242,63 @@ app.post("/api/orders", verifyToken, async (req, res) => {
     res.status(500).json({ message: "Lỗi server khi đặt hàng." });
   }
 });
-try {
-    const last = await Order.findOne().sort({ id: -1 });
-    const nextId = last ? last.id + 1 : 1;
-    const orderCode = `#S${moment().format("YYYY")}${(nextId % 10000)
-      .toString()
-      .padStart(4, "0")}`;
 
-    const orderItems = (items || []).map((i) => ({
-      product_id: i.product_id,
-      name: i.name,
-      size: i.size || "",
-      price: i.price,
-      quantity: i.quantity,
-      image_url: i.image_url || "",
-    }));
+// ================= LỊCH SỬ ĐƠN HÀNG =================
+// Cho phép /api/orders/history/me hoặc /api/orders/history/:userId
+// LỊCH SỬ ĐƠN HÀNG — KHÔNG DÙNG optional param nữa
 
-    const newOrder = new Order({
-      id: nextId,
-      order_code: orderCode,
-      user_id: userId,
-      customer_name: customerName,
-      customer_email: req.user.email,
-      shipping_address: shippingAddress,
-      phone_number: phoneNumber,
-      payment_method: paymentMethod || "COD",
-      notes: notes || "",
-      total_amount: totalAmount,
-      items: orderItems,
-      status: "Pending",
-      created_at: moment().toISOString(),
-    });
-
-    await newOrder.save();
-
-    try {
-      req.app.get("socketio")?.emit("newOrder", {
-        id: newOrder.id,
-        order_code: newOrder.order_code,
-        customer_name: newOrder.customer_name,
-        total_amount: newOrder.total_amount,
-        created_at: newOrder.created_at,
-        status: "Pending",
-      });
-    } catch {}
-
-    try {
-      req.app.get("socketio")?.to(`user-${newOrder.user_id}`).emit("userOrderCreated", {
-        id: newOrder.id,
-        order_code: newOrder.order_code,
-        status: newOrder.status,
-        total_amount: newOrder.total_amount,
-        created_at: newOrder.created_at,
-      });
-    } catch {}
-
-    res.status(201).json({ message: "Đặt hàng thành công!", order: docToJson(newOrder) });
-  } catch (e) {
-    console.error("❌ Lỗi khi tạo đơn:", e);
-    res.status(500).json({ message: "Lỗi server khi đặt hàng." });
-  }
-});
-
-// Lịch sử đơn hàng của KH
-app.get("/api/orders/history/:userId", verifyToken, async (req, res) => {
+// 1) User tự xem lịch sử của chính mình
+app.get("/api/orders/history", verifyToken, async (req, res) => {
   try {
-    const userId = Number(req.params.userId);
-    if (!Number.isFinite(userId)) return res.status(400).json({ message: "ID không hợp lệ." });
-    if (req.user.role !== "admin" && req.user.userId !== userId) {
-      return res.status(403).json({ message: "Không có quyền xem lịch sử của người khác." });
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(me)) {
+      return res.status(400).json({ message: "ID không hợp lệ." });
     }
-    const orders = await Order.find({ user_id: userId }).sort({ created_at: -1 });
+    const orders = await Order.find({ user_id: me }).sort({ created_at: -1 });
     res.json(orders.map(docToJson));
   } catch (e) {
-    console.error("❌ Lỗi tải lịch sử đơn:", e);
+    console.error("❌ Lỗi tải lịch sử đơn (self):", e);
     res.status(200).json([]);
   }
 });
+
+// 2) Alias rõ ràng cho self
+app.get("/api/orders/history/me", verifyToken, async (req, res) => {
+  try {
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(me)) {
+      return res.status(400).json({ message: "ID không hợp lệ." });
+    }
+    const orders = await Order.find({ user_id: me }).sort({ created_at: -1 });
+    res.json(orders.map(docToJson));
+  } catch (e) {
+    console.error("❌ Lỗi tải lịch sử đơn (me):", e);
+    res.status(200).json([]);
+  }
+});
+
+// 3) Admin xem lịch sử của user bất kỳ; user thường chỉ xem được của chính mình
+app.get("/api/orders/history/:userId", verifyToken, async (req, res) => {
+  try {
+    const me = Number(req.user.userId);
+    const targetId = Number(req.params.userId);
+
+    if (!Number.isFinite(targetId)) {
+      return res.status(400).json({ message: "ID không hợp lệ." });
+    }
+    // Non-admin không được xem lịch sử của người khác
+    if (req.user.role !== "admin" && me !== targetId) {
+      return res.status(403).json({ message: "Không có quyền xem lịch sử của người khác." });
+    }
+
+    const orders = await Order.find({ user_id: targetId }).sort({ created_at: -1 });
+    res.json(orders.map(docToJson));
+  } catch (e) {
+    console.error("❌ Lỗi tải lịch sử đơn (by userId):", e);
+    res.status(200).json([]);
+  }
+});
+
 
 // ================= ADMIN APIs (users) =================
 app.get("/api/admin/users", verifyToken, isAdmin, async (req, res) => {
@@ -347,7 +328,7 @@ app.get("/debug/db", (req, res) => {
   res.json({
     dbName: conn.name,
     host: conn.host,
-    user: conn.user || null
+    user: conn.user || null,
   });
 });
 
@@ -362,7 +343,7 @@ const orderRoutes = require("./routes/orders");
 app.use("/api/admin/inventory", inventoryRoutes);
 app.use("/api/admin/orders", orderRoutes);
 // 🆕 Public detail để FE gọi /api/orders/:id (có verifyToken trong routes)
-app.use("/api/orders", orderRoutes.publicRouter); // <-- thêm dòng này
+app.use("/api/orders", orderRoutes.publicRouter); // không đổi
 
 // ================= SOCKET.IO =================
 const server = http.createServer(app);
@@ -405,34 +386,3 @@ async function start() {
 }
 
 start();
-
-// ===== AUTO-APPENDED PATCHES =====
-// NOTE: Could not auto-locate existing app.get('/api/orders/history', ...) block. Appending patched version below.
-// Lịch sử đơn hàng — cho phép /api/orders/history/me hoặc /api/orders/history/:userId
-app.get("/api/orders/history/:userId?", verifyToken, async (req, res) => {
-  try {
-    const me = Number(req.user.userId);
-    const param = req.params.userId;
-    const targetId =
-      param === undefined || param === "me" ? me : Number(param);
-
-    if (!Number.isFinite(targetId)) {
-      return res.status(400).json({ message: "ID không hợp lệ." });
-    }
-
-    // Non-admin chỉ được xem lịch sử của chính mình
-    if (req.user.role !== "admin" && me !== targetId) {
-      return res
-        .status(403)
-        .json({ message: "Không có quyền xem lịch sử của người khác." });
-    }
-
-    const orders = await Order.find({ user_id: targetId }).sort({
-      created_at: -1,
-    });
-    res.json(orders.map(docToJson));
-  } catch (e) {
-    console.error("❌ Lỗi tải lịch sử đơn:", e);
-    res.status(200).json([]);
-  }
-});
