@@ -79,13 +79,7 @@ export default function AdminSettingsScreen({ navigation }) {
             <Text style={styles.label}>Email</Text>
             <Text style={styles.value}>{adminEmail || "—"}</Text>
           </View>
-          <TouchableOpacity
-            style={styles.btnOutline}
-            onPress={() => Alert.alert("Gợi ý", "Đổi mật khẩu nên làm ở phía server (API).")}
-          >
-            <Ionicons name="lock-closed-outline" size={18} color="#2C3E50" />
-            <Text style={styles.btnOutlineText}>Đổi mật khẩu (gợi ý)</Text>
-          </TouchableOpacity>
+         
         </View>
 
         {/* Thông báo */}

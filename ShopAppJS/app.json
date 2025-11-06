@@ -25,6 +25,18 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "bb4782f3-9fff-4957-bc2d-16436a01344e"
+      }
+    },
+    "owner": "prossa253",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/bb4782f3-9fff-4957-bc2d-16436a01344e"
     }
   }
 }
