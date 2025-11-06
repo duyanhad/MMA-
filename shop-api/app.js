@@ -1,4 +1,4 @@
-// app.js
+// app.js — bản đã sửa (tập trung: JWT header linh hoạt + API /api/orders/me + dọn trùng kết nối)
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -11,22 +11,20 @@ require("dotenv").config({ override: true });
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use("/api/auth", require("./routes/auth"));
+
 // ================= CONFIG =================
-const MONGO_URI  = process.env.MONGO_URI;
+const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY_123456";
 
-// (tuỳ chọn) in ra để kiểm tra đã đọc đúng .env, nhưng ẩn user/pass:
 console.log(
   "Using MONGO_URI =",
   (MONGO_URI || "").replace(/\/\/.*?:.*?@/, "//<user>:<pass>@")
 );
 
-// ================= DB CONNECT =================
-mongoose
-  .connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 })
-  .then(() => console.log("✅ Connected to MongoDB Atlas"))
-  .catch((e) => console.error("❌ MongoDB connection error:", e.message));
+/* ================= MODELS ================= */
+const User = require("./models/User");
+const Product = require("./models/Product");
+const Order = require("./models/Order");
 
 // ================= HELPERS =================
 const docToJson = (doc) => {
@@ -37,14 +35,11 @@ const docToJson = (doc) => {
   return json;
 };
 
-// ✅ Chuẩn hoá Product: Map -> Object cho size_stocks + ép key về string
 const productToJson = (doc) => {
   if (!doc) return null;
   const p = doc.toObject ? doc.toObject() : { ...doc };
-
   delete p.__v;
   delete p._id;
-
   if (p.size_stocks instanceof Map) {
     p.size_stocks = Object.fromEntries(p.size_stocks);
   }
@@ -53,24 +48,26 @@ const productToJson = (doc) => {
     norm[String(k)] = Number(p.size_stocks[k] || 0);
   }
   p.size_stocks = norm;
-
   return p;
 };
 
-/* ================= MODELS (fix lỗi OverwriteModelError) ================ */
-// ❗ Thay cho toàn bộ khối SCHEMAS cũ: chỉ import model đã định nghĩa sẵn
-const User    = require("./models/User");
-const Product = require("./models/Product");
-const Order   = require("./models/Order");
-/* ====================================================================== */
-
 // ================= MIDDLEWARE =================
+// Chấp nhận: "Authorization: Bearer <token>" hoặc chỉ truyền token trần, hoặc x-access-token
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
+  const xToken = req.headers["x-access-token"]; // fallback
+  let token = null;
+
+  if (authHeader) {
+    const parts = authHeader.split(" ");
+    token = parts.length === 2 ? parts[1] : parts[0];
+  }
+  if (!token && xToken) token = xToken;
+
   if (!token) return res.status(401).json({ message: "Không tìm thấy token." });
+
   jwt.verify(token, JWT_SECRET, (err, payload) => {
-    if (err) return res.status(403).json({ message: "Token không hợp lệ." });
+    if (err) return res.status(403).json({ message: "Token không hợp lệ hoặc đã hết hạn." });
     req.user = payload; // { userId, email, role }
     next();
   });
@@ -82,7 +79,8 @@ const isAdmin = (req, res, next) => {
 };
 
 // ================= AUTH =================
-app.post("/auth/register", async (req, res) => {
+// Giữ nguyên route prefix /api/auth để thống nhất với FE
+app.post("/api/auth/register", async (req, res) => {
   const { name, email, password } = req.body;
   try {
     const exists = await User.findOne({ email });
@@ -100,7 +98,7 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-app.post("/auth/login", async (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   try {
     const user = await User.findOne({ email, password });
@@ -132,7 +130,6 @@ app.get("/api/products", async (req, res) => {
   }
 });
 
-// ✅ Chi tiết sản phẩm public
 app.get("/api/products/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -156,7 +153,7 @@ app.get("/api/brands", async (req, res) => {
   }
 });
 
-// Khách đặt hàng
+// Khách tạo đơn — yêu cầu token khớp userId
 app.post("/api/orders", verifyToken, async (req, res) => {
   const {
     userId,
@@ -234,7 +231,18 @@ app.post("/api/orders", verifyToken, async (req, res) => {
   }
 });
 
-// Lịch sử đơn hàng của KH
+// Lịch sử đơn của chính mình — KHÔNG cần truyền userId trên URL
+app.get("/api/orders/me", verifyToken, async (req, res) => {
+  try {
+    const orders = await Order.find({ user_id: req.user.userId }).sort({ created_at: -1 });
+    res.json(orders.map(docToJson));
+  } catch (e) {
+    console.error("❌ Lỗi tải lịch sử đơn (me):", e);
+    res.status(500).json({ message: "Lỗi server khi tải lịch sử đơn." });
+  }
+});
+
+// Lịch sử đơn theo userId — vẫn giữ cho admin hoặc khi FE đã dùng sẵn
 app.get("/api/orders/history/:userId", verifyToken, async (req, res) => {
   try {
     const userId = Number(req.params.userId);
@@ -246,40 +254,36 @@ app.get("/api/orders/history/:userId", verifyToken, async (req, res) => {
     res.json(orders.map(docToJson));
   } catch (e) {
     console.error("❌ Lỗi tải lịch sử đơn:", e);
-    res.status(200).json([]);
+    res.status(500).json({ message: "Lỗi server khi tải lịch sử đơn." });
   }
 });
 
-// ================= ADMIN APIs (users) =================
+// ================= ADMIN APIs =================
 app.get("/api/admin/users", verifyToken, isAdmin, async (req, res) => {
   try {
     const users = await User.find({}, "-password");
     res.json(users.map(docToJson));
   } catch (e) {
     console.error("❌ Lỗi tải người dùng:", e);
-    res.status(200).json([]);
+    res.status(500).json({ message: "Lỗi server khi tải người dùng." });
   }
 });
 
-// === Alias: GET /api/orders (admin only, xem danh sách tất cả đơn)
-app.get("/api/orders", verifyToken, isAdmin, async (req, res) => {
+// Danh sách tất cả đơn — tránh đè /api/orders ở publicRouter
+app.get("/api/admin/orders/all", verifyToken, isAdmin, async (req, res) => {
   try {
     const orders = await Order.find().sort({ created_at: -1 });
     res.json(orders.map(docToJson));
   } catch (e) {
-    console.error("❌ Lỗi tải đơn (alias /api/orders):", e);
-    res.status(200).json([]);
+    console.error("❌ Lỗi tải đơn (admin/all):", e);
+    res.status(500).json({ message: "Lỗi server khi tải đơn." });
   }
 });
 
 // ================= DEBUG =================
 app.get("/debug/db", (req, res) => {
   const conn = mongoose.connection;
-  res.json({
-    dbName: conn.name,
-    host: conn.host,
-    user: conn.user || null
-  });
+  res.json({ dbName: conn.name, host: conn.host, user: conn.user || null });
 });
 
 app.get("/debug/users", async (req, res) => {
@@ -292,8 +296,7 @@ const inventoryRoutes = require("./routes/inventory");
 const orderRoutes = require("./routes/orders");
 app.use("/api/admin/inventory", inventoryRoutes);
 app.use("/api/admin/orders", orderRoutes);
-// 🆕 Public detail để FE gọi /api/orders/:id (có verifyToken trong routes)
-app.use("/api/orders", orderRoutes.publicRouter); // <-- thêm dòng này
+app.use("/api/orders", orderRoutes.publicRouter); // giữ public detail /:id có verifyToken trong routes
 
 // ================= SOCKET.IO =================
 const server = http.createServer(app);
@@ -315,22 +318,19 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => console.log("❌ Disconnected:", socket.id));
 });
 
+// ================= START =================
 const PORT = process.env.PORT || 3000;
 
 async function start() {
   try {
-    // tăng timeout lên 30s để ổn định hơn
-    await mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 30000,
-    });
+    await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 30000 });
     console.log("✅ Connected to MongoDB Atlas");
 
-    app.listen(PORT, "0.0.0.0", () => {
+    server.listen(PORT, "0.0.0.0", () => {
       console.log(`✅ Server is running on port ${PORT}`);
     });
   } catch (err) {
     console.error("❌ Mongo connect failed:", err.message);
-    // thử lại sau 5s (tránh chết service -> 502)
     setTimeout(start, 5000);
   }
 }
