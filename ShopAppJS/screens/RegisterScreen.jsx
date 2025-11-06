@@ -15,7 +15,8 @@ import CustomInput from '../components/CustomInput';
 import { LinearGradient } from 'expo-linear-gradient';
 
 // ⚙️ Đặt đúng IP backend của bạn
-const API_URL = 'http://192.168.1.103:3000';
+const API_URL = 'https://mma-3kpy.onrender.com';
+// const API_URL = 'http://192.168.1.103:3000';
 
 export default function RegisterScreen({ navigation }) {
   const [name, setName] = useState('');
