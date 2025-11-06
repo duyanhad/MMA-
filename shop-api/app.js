@@ -157,15 +157,9 @@ app.get("/api/brands", async (req, res) => {
 });
 
 // Khách đặt hàng
-// Khách đặt hàng (Checkout) — lấy userId từ token, KHÔNG dùng userId trong body
 app.post("/api/orders", verifyToken, async (req, res) => {
-  const uid = Number(req.user.userId); // userId từ JWT
-  if (!Number.isFinite(uid)) {
-    return res.status(401).json({ message: "Token không hợp lệ." });
-  }
-
   const {
-    // userId,  // <-- KHÔNG DÙNG userId từ body nữa
+    userId,
     customerName,
     shippingAddress,
     phoneNumber,
@@ -175,17 +169,16 @@ app.post("/api/orders", verifyToken, async (req, res) => {
     notes,
   } = req.body;
 
+  if (req.user.userId !== userId)
+    return res.status(403).json({ message: "Token không khớp với người dùng." });
+
   try {
-    // Lấy id kế tiếp
     const last = await Order.findOne().sort({ id: -1 });
     const nextId = last ? last.id + 1 : 1;
-
-    // Tạo mã đơn
     const orderCode = `#S${moment().format("YYYY")}${(nextId % 10000)
       .toString()
       .padStart(4, "0")}`;
 
-    // Chuẩn hoá item
     const orderItems = (items || []).map((i) => ({
       product_id: i.product_id,
       name: i.name,
@@ -195,11 +188,10 @@ app.post("/api/orders", verifyToken, async (req, res) => {
       image_url: i.image_url || "",
     }));
 
-    // Tạo document
     const newOrder = new Order({
       id: nextId,
       order_code: orderCode,
-      user_id: uid, // <— dùng userId từ token
+      user_id: userId,
       customer_name: customerName,
       customer_email: req.user.email,
       shipping_address: shippingAddress,
@@ -214,23 +206,19 @@ app.post("/api/orders", verifyToken, async (req, res) => {
 
     await newOrder.save();
 
-    // Thông báo real-time cho admin
     try {
-      const io = req.app.get("socketio");
-      io?.emit("newOrder", {
+      req.app.get("socketio")?.emit("newOrder", {
         id: newOrder.id,
         order_code: newOrder.order_code,
         customer_name: newOrder.customer_name,
         total_amount: newOrder.total_amount,
         created_at: newOrder.created_at,
-        status: newOrder.status,
+        status: "Pending",
       });
     } catch {}
 
-    // Thông báo real-time cho user
     try {
-      const io = req.app.get("socketio");
-      io?.to(`user-${newOrder.user_id}`).emit("userOrderCreated", {
+      req.app.get("socketio")?.to(`user-${newOrder.user_id}`).emit("userOrderCreated", {
         id: newOrder.id,
         order_code: newOrder.order_code,
         status: newOrder.status,
@@ -239,42 +227,25 @@ app.post("/api/orders", verifyToken, async (req, res) => {
       });
     } catch {}
 
-    res
-      .status(201)
-      .json({ message: "Đặt hàng thành công!", order: docToJson(newOrder) });
+    res.status(201).json({ message: "Đặt hàng thành công!", order: docToJson(newOrder) });
   } catch (e) {
     console.error("❌ Lỗi khi tạo đơn:", e);
     res.status(500).json({ message: "Lỗi server khi đặt hàng." });
   }
 });
 
-
 // Lịch sử đơn hàng của KH
-// Lịch sử đơn hàng — cho phép /api/orders/history/me hoặc /api/orders/history/:userId
-app.get("/api/orders/history/:userId?", verifyToken, async (req, res) => {
+app.get("/api/orders/history/:userId", verifyToken, async (req, res) => {
   try {
-    const me = Number(req.user.userId);
-    const param = req.params.userId;
-    const targetId = param === undefined || param === "me" ? me : Number(param);
-
-    if (!Number.isFinite(targetId)) {
-      return res.status(400).json({ message: "ID không hợp lệ." });
+    const userId = Number(req.params.userId);
+    if (!Number.isFinite(userId)) return res.status(400).json({ message: "ID không hợp lệ." });
+    if (req.user.role !== "admin" && req.user.userId !== userId) {
+      return res.status(403).json({ message: "Không có quyền xem lịch sử của người khác." });
     }
-
-    // Non-admin chỉ được xem lịch sử của chính mình
-    if (req.user.role !== "admin" && me !== targetId) {
-      return res
-        .status(403)
-        .json({ message: "Không có quyền xem lịch sử của người khác." });
-    }
-
-    const orders = await Order.find({ user_id: targetId }).sort({
-      created_at: -1,
-    });
+    const orders = await Order.find({ user_id: userId }).sort({ created_at: -1 });
     res.json(orders.map(docToJson));
   } catch (e) {
     console.error("❌ Lỗi tải lịch sử đơn:", e);
-    // giữ nguyên hành vi trả mảng rỗng khi lỗi nhẹ
     res.status(200).json([]);
   }
 });
