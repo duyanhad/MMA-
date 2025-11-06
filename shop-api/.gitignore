@@ -2,12 +2,3 @@
 @"
 node_modules
 .env
-"@ | Set-Content -Path .gitignore -Encoding utf8
-
-# Gỡ các file đã lỡ commit khỏi Git index (giữ file trên máy)
-git rm -r --cached node_modules .env
-
-# Commit & push
-git add .gitignore
-git commit -m "chore: ignore node_modules and .env"
-git push
