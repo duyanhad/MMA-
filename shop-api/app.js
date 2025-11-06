@@ -17,11 +17,8 @@ app.use("/api/auth", require("./routes/auth"));
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY_123456";
 
-// (tuỳ chọn) in ra để kiểm tra đã đọc đúng .env, nhưng ẩn user/pass:
-console.log(
-  "Using MONGO_URI =",
-  (MONGO_URI || "").replace(/\/\/.*?:.*?@/, "//<user>:<pass>@")
-);
+// Ẩn user/pass khi in URI
+console.log("Using MONGO_URI =", (MONGO_URI || "").replace(/\/\/.*?:.*?@/, "//<user>:<pass>@"));
 
 // ================= DB CONNECT =================
 mongoose
@@ -38,31 +35,10 @@ const docToJson = (doc) => {
   return json;
 };
 
-// ✅ Chuẩn hoá Product: Map -> Object cho size_stocks + ép key về string
-const productToJson = (doc) => {
-  if (!doc) return null;
-  const p = doc.toObject ? doc.toObject() : { ...doc };
-
-  delete p.__v;
-  delete p._id;
-
-  if (p.size_stocks instanceof Map) {
-    p.size_stocks = Object.fromEntries(p.size_stocks);
-  }
-  const norm = {};
-  for (const k in p.size_stocks || {}) {
-    norm[String(k)] = Number(p.size_stocks[k] || 0);
-  }
-  p.size_stocks = norm;
-
-  return p;
-};
-
-/* ================= MODELS (fix lỗi OverwriteModelError) ================ */
+// ================= MODELS =================
 const User = require("./models/User");
 const Product = require("./models/Product");
 const Order = require("./models/Order");
-/* ====================================================================== */
 
 // ================= MIDDLEWARE =================
 const verifyToken = (req, res, next) => {
@@ -91,7 +67,7 @@ app.post("/auth/register", async (req, res) => {
     const last = await User.findOne().sort({ id: -1 });
     const nextId = last ? last.id + 1 : 1;
 
-    const user = new User({ id: nextId, name, email, password });
+    const user = new User({ id: nextId, name, email, password, role: "customer" });
     await user.save();
     res.status(201).json({ message: "Đăng ký thành công!", user: docToJson(user) });
   } catch (e) {
@@ -119,67 +95,29 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
-// ================= PUBLIC/CUSTOMER APIs =================
+// ================= PUBLIC PRODUCT APIs =================
 app.get("/api/products", async (req, res) => {
   try {
-    const brand = req.query.brand;
-    const query = brand && brand !== "Tất cả" ? { brand } : {};
-    const products = await Product.find(query).sort({ id: 1 }).limit(200);
-    res.json(products.map(productToJson));
+    const products = await Product.find().sort({ id: 1 }).limit(200);
+    res.json(products.map(docToJson));
   } catch (e) {
     console.error("❌ Lỗi tải sản phẩm:", e);
     res.status(500).json({ message: "Lỗi khi tải sản phẩm." });
   }
 });
 
-// ✅ Chi tiết sản phẩm public
-app.get("/api/products/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ message: "ID không hợp lệ." });
-    const p = await Product.findOne({ id });
-    if (!p) return res.status(404).json({ message: "Không tìm thấy sản phẩm." });
-    res.json(productToJson(p));
-  } catch (e) {
-    console.error("❌ Lỗi lấy chi tiết sản phẩm:", e);
-    res.status(500).json({ message: "Lỗi server khi lấy chi tiết sản phẩm." });
-  }
-});
-
-app.get("/api/brands", async (req, res) => {
-  try {
-    const brands = await Product.distinct("brand");
-    res.json(brands);
-  } catch (e) {
-    console.error("❌ Lỗi tải brands:", e);
-    res.status(500).json({ message: "Lỗi server khi tải thương hiệu." });
-  }
-});
-
-// ================= CHECKOUT (KH đặt hàng) =================
-// Lấy userId từ token, KHÔNG dùng userId trong body
+// ================= CHECKOUT =================
 app.post("/api/orders", verifyToken, async (req, res) => {
-  const uid = Number(req.user.userId); // userId từ JWT
-  if (!Number.isFinite(uid)) {
-    return res.status(401).json({ message: "Token không hợp lệ." });
-  }
+  const uid = Number(req.user.userId);
+  if (!Number.isFinite(uid)) return res.status(401).json({ message: "Token không hợp lệ." });
 
-  const {
-    customerName,
-    shippingAddress,
-    phoneNumber,
-    paymentMethod,
-    totalAmount,
-    items,
-    notes,
-  } = req.body;
+  const { customerName, shippingAddress, phoneNumber, paymentMethod, totalAmount, items, notes } =
+    req.body;
 
   try {
     const last = await Order.findOne().sort({ id: -1 });
     const nextId = last ? last.id + 1 : 1;
-    const orderCode = `#S${moment().format("YYYY")}${(nextId % 10000)
-      .toString()
-      .padStart(4, "0")}`;
+    const orderCode = `#S${moment().format("YYYY")}${(nextId % 10000).toString().padStart(4, "0")}`;
 
     const orderItems = (items || []).map((i) => ({
       product_id: i.product_id,
@@ -193,7 +131,7 @@ app.post("/api/orders", verifyToken, async (req, res) => {
     const newOrder = new Order({
       id: nextId,
       order_code: orderCode,
-      user_id: uid, // lấy từ token
+      user_id: uid,
       customer_name: customerName,
       customer_email: req.user.email,
       shipping_address: shippingAddress,
@@ -207,53 +145,18 @@ app.post("/api/orders", verifyToken, async (req, res) => {
     });
 
     await newOrder.save();
-
-    // socket: broadcast tới admin + room của user
-    try {
-      req.app.get("socketio")?.emit("newOrder", {
-        id: newOrder.id,
-        order_code: newOrder.order_code,
-        customer_name: newOrder.customer_name,
-        total_amount: newOrder.total_amount,
-        created_at: newOrder.created_at,
-        status: "Pending",
-      });
-    } catch {}
-
-    try {
-      req.app
-        .get("socketio")
-        ?.to(`user-${newOrder.user_id}`)
-        .emit("userOrderCreated", {
-          id: newOrder.id,
-          order_code: newOrder.order_code,
-          status: newOrder.status,
-          total_amount: newOrder.total_amount,
-          created_at: newOrder.created_at,
-        });
-    } catch {}
-
-    res.status(201).json({
-      message: "Đặt hàng thành công!",
-      order: docToJson(newOrder),
-    });
+    res.status(201).json({ message: "Đặt hàng thành công!", order: docToJson(newOrder) });
   } catch (e) {
     console.error("❌ Lỗi khi tạo đơn:", e);
     res.status(500).json({ message: "Lỗi server khi đặt hàng." });
   }
 });
 
-// ================= LỊCH SỬ ĐƠN HÀNG =================
-// Cho phép /api/orders/history/me hoặc /api/orders/history/:userId
-// LỊCH SỬ ĐƠN HÀNG — KHÔNG DÙNG optional param nữa
-
-// 1) User tự xem lịch sử của chính mình
+// ================= ORDER HISTORY =================
+// CUSTOMER xem lịch sử của chính mình
 app.get("/api/orders/history", verifyToken, async (req, res) => {
   try {
     const me = Number(req.user.userId);
-    if (!Number.isFinite(me)) {
-      return res.status(400).json({ message: "ID không hợp lệ." });
-    }
     const orders = await Order.find({ user_id: me }).sort({ created_at: -1 });
     res.json(orders.map(docToJson));
   } catch (e) {
@@ -262,13 +165,10 @@ app.get("/api/orders/history", verifyToken, async (req, res) => {
   }
 });
 
-// 2) Alias rõ ràng cho self
+// Alias cho FE: /me
 app.get("/api/orders/history/me", verifyToken, async (req, res) => {
   try {
     const me = Number(req.user.userId);
-    if (!Number.isFinite(me)) {
-      return res.status(400).json({ message: "ID không hợp lệ." });
-    }
     const orders = await Order.find({ user_id: me }).sort({ created_at: -1 });
     res.json(orders.map(docToJson));
   } catch (e) {
@@ -277,30 +177,22 @@ app.get("/api/orders/history/me", verifyToken, async (req, res) => {
   }
 });
 
-// 3) Admin xem lịch sử của user bất kỳ; user thường chỉ xem được của chính mình
+// ADMIN xem lịch sử của user bất kỳ
 app.get("/api/orders/history/:userId", verifyToken, async (req, res) => {
   try {
-    const me = Number(req.user.userId);
+    if (req.user.role !== "admin")
+      return res.status(403).json({ message: "Không có quyền xem lịch sử người khác." });
+
     const targetId = Number(req.params.userId);
-
-    if (!Number.isFinite(targetId)) {
-      return res.status(400).json({ message: "ID không hợp lệ." });
-    }
-    // Non-admin không được xem lịch sử của người khác
-    if (req.user.role !== "admin" && me !== targetId) {
-      return res.status(403).json({ message: "Không có quyền xem lịch sử của người khác." });
-    }
-
     const orders = await Order.find({ user_id: targetId }).sort({ created_at: -1 });
     res.json(orders.map(docToJson));
   } catch (e) {
-    console.error("❌ Lỗi tải lịch sử đơn (by userId):", e);
+    console.error("❌ Lỗi tải lịch sử đơn (admin):", e);
     res.status(200).json([]);
   }
 });
 
-
-// ================= ADMIN APIs (users) =================
+// ================= ADMIN APIs =================
 app.get("/api/admin/users", verifyToken, isAdmin, async (req, res) => {
   try {
     const users = await User.find({}, "-password");
@@ -311,78 +203,19 @@ app.get("/api/admin/users", verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-// === Alias: GET /api/orders (admin only, xem danh sách tất cả đơn)
-app.get("/api/orders", verifyToken, isAdmin, async (req, res) => {
-  try {
-    const orders = await Order.find().sort({ created_at: -1 });
-    res.json(orders.map(docToJson));
-  } catch (e) {
-    console.error("❌ Lỗi tải đơn (alias /api/orders):", e);
-    res.status(200).json([]);
-  }
-});
-
-// ================= DEBUG =================
-app.get("/debug/db", (req, res) => {
-  const conn = mongoose.connection;
-  res.json({
-    dbName: conn.name,
-    host: conn.host,
-    user: conn.user || null,
-  });
-});
-
-app.get("/debug/users", async (req, res) => {
-  const users = await User.find({}, "id email role").limit(10);
-  res.json(users);
-});
-
-// ================= MOUNT ROUTES (INVENTORY & ORDERS) =================
-const inventoryRoutes = require("./routes/inventory");
-const orderRoutes = require("./routes/orders");
-app.use("/api/admin/inventory", inventoryRoutes);
-app.use("/api/admin/orders", orderRoutes);
-// 🆕 Public detail để FE gọi /api/orders/:id (có verifyToken trong routes)
-app.use("/api/orders", orderRoutes.publicRouter); // không đổi
-
-// ================= SOCKET.IO =================
+// ================= SOCKET =================
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 app.set("socketio", io);
 
 io.on("connection", (socket) => {
   console.log("✅ Socket connected:", socket.id);
-
   socket.on("registerUser", (userId) => {
     const n = Number(userId);
-    if (Number.isFinite(n)) {
-      const room = `user-${n}`;
-      socket.join(room);
-      console.log(`📌 ${socket.id} joined ${room}`);
-    }
+    if (Number.isFinite(n)) socket.join(`user-${n}`);
   });
-
   socket.on("disconnect", () => console.log("❌ Disconnected:", socket.id));
 });
 
 const PORT = process.env.PORT || 3000;
-
-async function start() {
-  try {
-    // tăng timeout lên 30s để ổn định hơn
-    await mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 30000,
-    });
-    console.log("✅ Connected to MongoDB Atlas");
-
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`✅ Server is running on port ${PORT}`);
-    });
-  } catch (err) {
-    console.error("❌ Mongo connect failed:", err.message);
-    // thử lại sau 5s (tránh chết service -> 502)
-    setTimeout(start, 5000);
-  }
-}
-
-start();
+app.listen(PORT, "0.0.0.0", () => console.log(`✅ Server is running on port ${PORT}`));
