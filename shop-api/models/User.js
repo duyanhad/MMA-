@@ -3,13 +3,29 @@ const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
+    // Để khớp với app.js (JWT đang dùng user.id)
+    id:       { type: Number, unique: true, sparse: true },
+
+    // Schema cũ yêu cầu username — giữ lại để tương thích
     username: { type: String, required: true },
-    email:    { type: String, required: true, unique: true },
+
+    // BE hiện tạo bằng trường "name" => chấp nhận luôn
+    name:     { type: String },
+
+    email:    { type: String, required: true, unique: true, index: true },
     password: { type: String, required: true },
-    role:     { type: String, default: "user" }, // có thể là 'admin' hoặc 'user'
+
+    role:     { type: String, default: "customer" }, // "admin" | "customer"
+    isBlocked:{ type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-// ✅ Dòng này rất quan trọng để tránh OverwriteModelError khi hot reload hoặc require lại
+// Nếu chỉ gửi "name" mà thiếu "username", tự map trước khi lưu
+userSchema.pre("save", function (next) {
+  if (!this.username && this.name) this.username = this.name;
+  next();
+});
+
+// Tránh OverwriteModelError khi hot-reload/nodemon
 module.exports = mongoose.models.User || mongoose.model("User", userSchema);
