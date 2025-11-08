@@ -305,6 +305,45 @@ app.get("/api/admin/users", verifyToken, isAdmin, async (req, res) => {
     res.status(200).json([]);
   }
 });
+// ✅ API khóa / mở khóa người dùng
+app.put("/api/admin/users/:id/block", verifyToken, isAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const { isBlocked } = req.body;
+
+    if (!Number.isFinite(userId)) {
+      return res.status(400).json({ message: "ID không hợp lệ." });
+    }
+
+    const user = await User.findOne({ id: userId });
+    if (!user) {
+      return res.status(404).json({ message: "Không tìm thấy người dùng." });
+    }
+
+    // Không cho phép khóa chính admin
+    if (user.role === "admin") {
+      return res.status(403).json({ message: "Không thể khóa tài khoản admin." });
+    }
+
+    user.isBlocked = !!isBlocked;
+    await user.save();
+
+    res.json({
+      message: isBlocked ? "Đã khóa tài khoản." : "Đã mở khóa tài khoản.",
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        isBlocked: user.isBlocked,
+        role: user.role,
+      },
+    });
+  } catch (e) {
+    console.error("❌ Lỗi khóa người dùng:", e);
+    res.status(500).json({ message: "Lỗi server khi khóa/mở khóa tài khoản." });
+  }
+});
+
 
 // === Alias: GET /api/orders (admin only, xem danh sách tất cả đơn)
 app.get("/api/orders", verifyToken, isAdmin, async (req, res) => {
